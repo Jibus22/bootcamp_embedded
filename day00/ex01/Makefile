@@ -1,14 +1,21 @@
-FILENAME   = main
-PORT       = /dev/ttyUSB0
 DEVICE     = atmega328p
 PROGRAMMER = arduino
 BAUD       = 115200
 F_CPU      = 10000000UL
+
 CC         = avr-gcc
 OBJCOPY    = avr-objcopy 
 CFLAGS     = -Wall -Os -mmcu=$(DEVICE) -DF_CPU=${F_CPU}
 TARGET     = main
 SRCS       = main.c
+
+##### OSTYPE #####
+UNAME := $(shell uname)
+ifeq ($(UNAME), Darwin)
+	PORT       = /dev/tty.usbserial-1420
+else
+	PORT       = /dev/ttyUSB0
+endif
 
 
 all: hex flash

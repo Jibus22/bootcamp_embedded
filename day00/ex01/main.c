@@ -1,8 +1,10 @@
 #include <avr/io.h>
 
+#define LED_PIN 0
+
 int main() {
-	/* Set both first pin of PINB and PORTB IO registers to enable output high
-	 * according to the table 17.1 in chapter 17 of the datasheet */
-	PINB |= (1 << PINB0);
-	PORTB |= (1 << PORTB0);
+	/* We set the pinB0 direction to output with 1st instruction then its
+	 * output level to high with the 2nd one. Datasheet chapter 17 */
+	DDRB |= (1 << LED_PIN);
+	PORTB |= (1 << LED_PIN);
 }
