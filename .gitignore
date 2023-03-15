@@ -1,3 +1,4 @@
 *.hex
 *.bin
 *.pdf
+.DS_Store

@@ -15,6 +15,7 @@ int main() {
 
     /* nb of cpu cycle to achieve, to wait 500ms */
     busywait_cntr = F_CPU / (6 * (1000 / 500));
-    while (busywait_cntr-- > 0); /* busy wait */ 
+    while (busywait_cntr-- > 0)
+      ; /* busy wait */
   }
 }
