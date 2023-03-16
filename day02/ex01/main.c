@@ -1,10 +1,32 @@
+/* Here, timer1 is a PWM timer at 1kHz which controls OC1A pin: Clear OC1A on
+ * Compare Match, set OC1A at BOTTOM. Its OCR1A register which determines
+ * its duty cycle is updated from 0 to 1599 (0 to 100%) by the interrupt
+ * TIMER0_COMPA.
+ * Timer0 is a CTC timer at 1kHz which triggers a COMP_A interrupt
+ * every 1ms. The ISR is in charge of updating OCR1A. The goal is
+ * that OCR1A (so the duty cycle) increases during 500ms, then decrease 
+ * for the last 500ms, and again. */
+
 #include <avr/io.h>
+#include <avr/interrupt.h>
 
 #ifndef F_CPU
 #define F_CPU 16000000UL
 #endif
 
 #define LED2 1 // PB1
+
+volatile uint8_t direction;
+
+ISR(TIMER0_COMPA_vect ){
+  if (direction) {
+    OCR1A += 31; /* 15999 / 500 */
+    if (OCR1A >= 15500) direction = 0;
+  } else {
+    OCR1A -= 31;
+    if (OCR1A == 0) direction = 1;
+  }
+}
 
 int main() {
   DDRB |= (1 << LED2); /* set port B, pin 1 to ouput */
@@ -16,20 +38,32 @@ int main() {
   /* (ds: 19-6) set Fast PWM mode 14 so that we can define TOP in ICR1. */
   TCCR1A |= (1 << WGM11);
   TCCR1B |= (1 << WGM12) | (1 << WGM13);
+  /* Set clock on */
+  TCCR1B |= (1 << CS10);
+
+  /* Set TOP to 15999. At FCPU=16Mhz, counting up to 16000 takes 1ms */
+  ICR1 = 15999;
+
+  /* init OCR1A */
+  OCR1A = 0;
 
 
-  /* Set clock prescale to 1024 so Fclock=16Mhz/1024=15625Hz*/
-  TCCR1B |= (1 << CS12) | (1 << CS10);
+  /* (ds: 18-9) set CTC mode to timer0 */
+  TCCR0A |= (1 << WGM01);
+  /* (ds: table 18-10) set prescaler to 64. 16Mhz/64=250KHz. So it takes 250
+   * cycles to wait 1ms. */
+  TCCR0B |= (1 << CS00) | (1 << CS01);
 
-  /* Input Capture Register is set as a TOP the TCNT1 counter must reach before
-   * going back to the BOTTOM. 15624 takes 1sec to reach with a 15kHz clock */
-  ICR1 = 15624;
+  /* Output Compare Match to 250, takes 1ms to the clock 0 to reach it before
+   * reseting TCNT0 to 0 and triggering our ISR */
+  OCR0A = 250;
 
-  /* Output Compare Register, in non-inverting mode clears OC1A on compare match
-   * and set OC1A at BOTTOM. Compare match happens when TCNT1==OCR1A. Here we
-   * set the value to 10% of TOP = 10% of 15624 = 1562. That is, 10% of a second
-   * so 10ms. The led is bright 10ms per second */
-  OCR1A = 1562;
+  /* enable Output Compare A Match Interrupt (ds:18.9.3) */
+  TIMSK0 |= (1 << OCIE0A);
+
+  sei();
+
+  direction = 1;
 
   while (1) {}
   return 0;
