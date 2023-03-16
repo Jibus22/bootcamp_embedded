@@ -4,28 +4,33 @@
 #define F_CPU 16000000UL
 #endif
 
-#define LED 1
+#define LED2 1 // PB1
 
 int main() {
-  DDRB |= (1 << LED); /* set port B, pin 1 to ouput */
+  DDRB |= (1 << LED2); /* set port B, pin 1 to ouput */
 
-  /* Set CTC mode (ds: 19-6). And set up timer with an internal clock prescale
-   * (ds: 19-7)
-   * I choosed a prescale to CS12 (256) because 16Mhz/256=62500, so 1 second
-   * can be counted into a 16bit register without overflow. */
-  TCCR1B |= (1 << WGM12) | (1 << CS12);
+  /* (ds: 19-4) Clear OC1A on Compare Match, set OC1A at BOTTOM
+   * (non-inverting mode)*/
+  TCCR1A |= (1 << COM1A1);
 
-  /* Toggle OC1A on Compare Match (ds: 19-3). OC1A is on the pin PB1.
-   * So, whenever TCNT1 becomes equal to OCR1A = 31249, toggle OC1A (PB1) */
-  TCCR1A |= (1 << COM1A0);
+  /* (ds: 19-6) set Fast PWM mode 14 so that we can define TOP in ICR1. */
+  TCCR1A |= (1 << WGM11);
+  TCCR1B |= (1 << WGM12) | (1 << WGM13);
 
-  /* defining the TOP value (ds: 19.9.5).
-   * Following the formula 'timercount=required_delay/clocktime_period' we get
-   * this value so that the TOP value the timer/counter needs to reach spend
-   * 500ms to the clock. */
-  OCR1A = 31249;
 
-  while (1)
-    ;
+  /* Set clock prescale to 1024 so Fclock=16Mhz/1024=15625Hz*/
+  TCCR1B |= (1 << CS12) | (1 << CS10);
+
+  /* Input Capture Register is set as a TOP the TCNT1 counter must reach before
+   * going back to the BOTTOM. 15624 takes 1sec to reach with a 15kHz clock */
+  ICR1 = 15624;
+
+  /* Output Compare Register, in non-inverting mode clears OC1A on compare match
+   * and set OC1A at BOTTOM. Compare match happens when TCNT1==OCR1A. Here we
+   * set the value to 10% of TOP = 10% of 15624 = 1562. That is, 10% of a second
+   * so 10ms. The led is bright 10ms per second */
+  OCR1A = 1562;
+
+  while (1) {}
   return 0;
 }
