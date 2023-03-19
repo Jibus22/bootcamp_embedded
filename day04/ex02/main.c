@@ -1,6 +1,7 @@
 #include <avr/io.h>
 #include <util/twi.h>
 #include <util/delay.h>
+#include <stdlib.h>
 
 #ifndef F_CPU
 #define F_CPU 16000000UL
@@ -236,6 +237,8 @@ void hex_print_aht20_measure(unsigned char *data) {
 
 void aht20_measure() {
   unsigned char data[AHT20_DATA_ANSWER_LEN] = {0};
+  long value;
+  char str_temp[8] = {0}, str_hum[8] = {0};
 
   /* trigger measurement */
   i2c_start();
@@ -261,7 +264,23 @@ void aht20_measure() {
   for (int i = 1; i < AHT20_DATA_ANSWER_LEN; i++)
     data[i] = i2c_read(i == (AHT20_DATA_ANSWER_LEN - 1));
   i2c_stop();
+
   hex_print_aht20_measure(data);
+
+  value = (data[3] & 0x0F);
+  value = (value << 8) + (data[4]);
+  value = (value << 8) + (data[5]);
+  dtostrf((((double)value / ((long)1 << 20)) * 200.0 - 50.0), 3, 2, str_temp);
+  value = data[1];
+  value = (value << 8) + (data[2]);
+  value = (value << 4) + (data[3] >> 4);
+  dtostrf((((double)value / ((long)1 << 20)) * 100.0), 3, 2, str_hum);
+  uart_printstr("Temperature: ");
+  uart_printstr(str_temp);
+  uart_printstr(".C, Humidity: ");
+  uart_printstr(str_hum);
+  uart_printstr("%");
+  uart_printstr("\n\r");
 }
 
 int main() {
