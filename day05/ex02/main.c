@@ -60,10 +60,9 @@ void uart_init() {
   UBRR0H = (uint8_t)(baud >> 8);   /* write to higher byte */
   UBRR0L = (uint8_t)(baud & 0xFF); /* write to lower byte */
 
-  /* 24.12.3 USART Control and Status Register n B.
-   * Bit 3 – TXEN: Transmitter Enable Writing this bit to one enables
-   * the USART Transmitter.  */
-  UCSR0B |= (1 << TXEN0) | (1 << RXEN0);
+  /* Enable receiver and transmitter */
+  UCSR0B = (1 << TXEN0) | (1 << RXEN0);
+  UCSR0C = (3 << UCSZ00); /* be sure 8 bits enabled */
 }
 
 void uart_tx(char c) {
@@ -94,24 +93,64 @@ void uart_printstr(const char *str) {
 #define OFFSET_1 10
 #define OFFSET_2 30
 
-/* void eeprom_read_block (void *__dst, const void *__src, size_t __n); */
-/* void eeprom_write_block (const void *__src, void *__dst, size_t __n); */
+unsigned char EEPROM_read(unsigned int uiAddress)
+{
+  /* Wait for completion of previous write */
+  while(EECR & (1 << EEPE))
+    ;
+  /* Set up address register */
+  EEAR = uiAddress;
+  /* Start eeprom read by writing EERE */
+  EECR |= (1 << EERE);
+  /* Return data from Data Register */
+  return EEDR;
+}
+
+void EEPROM_write(unsigned int uiAddress, unsigned char ucData)
+{
+  /* Wait for completion of previous write */
+  while(EECR & (1 << EEPE))
+    ;
+  /* Set up address and Data Registers */
+  EEAR = uiAddress;
+  EEDR = ucData;
+  /* Write logical one to EEMPE */
+  EECR |= (1 << EEMPE);
+  /* Start eeprom write by setting EEPE */
+  EECR |= (1 << EEPE);
+}
+
+void EEPROM_read_block(void *buffer, size_t offset, size_t length) {
+  for (size_t i = 0; i < length; i++)
+    ((char*)buffer)[i] = EEPROM_read(offset + i);
+}
+
+void EEPROM_write_block(void *buffer, size_t offset, size_t length) {
+  for (size_t i = 0; i < length; i++)
+    EEPROM_write(offset + i, ((char*)buffer)[i]);
+}
 
 int main() {
+  uint8_t bang[32] = {0};
+  uint8_t oops[32] = {0};
   uint8_t buf[32] = {0};
   uart_init();
 
-  eeprom_read_block(buf, 0, 32);
-  uart_printstr("-->\r\n");
+  EEPROM_read_block(buf, 0, 32);
+  uart_printstr("1-->\r\n");
   uart_printstr((char*)buf);
   uart_printstr(".\r\n");
 
-  eeprom_write_block("Coucouahaha\r\n", (void*)0, 13);
+  /* eeprom_write_block(bla, (void*)0, 16); */
+  EEPROM_write_block("FFFFFFFFFFFFFF\r\n", 0, 16);
 
-  eeprom_read_block(buf, 0, 32);
-  uart_printstr("-->\r\n");
-  uart_printstr((char*)buf);
+  EEPROM_read_block(bang, 0, 32);
+  uart_printstr("2-->\r\n");
+  uart_printstr((char*)bang);
   uart_printstr(".\r\n");
+
+  EEPROM_write_block("BBBBBBBBBBBBBB\r\n", 0, 16);
+  EEPROM_write_block("QQQQQQQQQQQQQQ\r\n", 0, 16);
   while (1) {};
   return 0;
 }
