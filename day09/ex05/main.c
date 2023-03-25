@@ -257,6 +257,7 @@ void led_init() {
 #define SET_DIGIT(dig) pca9555_write(CMD_OUT_P0, PCA9555_SET_OUT(0xFF, dig));
 #define SET_NB(nb) pca9555_write(CMD_OUT_P1, PCA9555_SET_OUT(0xFF, nb));
 
+volatile uint16_t nb;
 volatile uint8_t nbrs[4], dig;
 static const uint8_t digit[4] = {DIG_1, DIG_2, DIG_3, DIG_4},
                      numbers[10] = {
@@ -281,21 +282,6 @@ void led_display_nb() {
   iter_plus(dig, 3);
 }
 
-/* un interrupt qui trigger toutes les 4 ms pour afficher un int volatile */
-ISR(TIMER0_COMPA_vect) { led_display_nb(); }
-
-void init_timer() {
-  /* TIMER0. mode ctc 2 */
-  TCCR0A = (1 << WGM01);
-  /* Set prescaler to 1024 */
-  TCCR0B = (1 << CS02) | (1 << CS00);
-  /* Timer/Counter0 Compare Match A interrupt enabled */
-  TIMSK0 = (1 << OCIE0A);
-  /* set TOP so that it is reached every 4 ms */
-  OCR0A = 70;
-  sei();
-}
-
 /* Break down nb in four digits. Store each digit in nbrs variable */
 void break_down(uint16_t n) {
   uint8_t result[4] = {0, 0, 0, 0};
@@ -310,19 +296,45 @@ void break_down(uint16_t n) {
   for (uint8_t k = 0; k < 4; k++) nbrs[k] = result[k];
 }
 
-int main() {
-  uint16_t nb = 0;
-  dig = 0;
+/* ISR triggered every 4ms to display one of four led digits and shift the
+ * index of the next digit to display */
+ISR(TIMER0_COMPA_vect) { led_display_nb(); }
 
+/* Interrupt service routine which breakdown nb into nbrs & increments nb
+ * every second */
+ISR(TIMER1_COMPA_vect) {
+  break_down(nb);
+  iter_plus(nb, 9999);
+}
+
+void init_timer() {
+  /* TIMER0. mode ctc 2 */
+  TCCR0A = (1 << WGM01);
+  /* Set prescaler to 1024 */
+  TCCR0B = (1 << CS02) | (1 << CS00);
+  /* Timer/Counter0 Compare Match A interrupt enabled */
+  TIMSK0 = (1 << OCIE0A);
+  /* set TOP so that it is reached every 4 ms */
+  OCR0A = 70;
+
+  /* TIMER1. mode ctc 4, prescaler 1024 */
+  TCCR1B = (1 << WGM12) | (1 << CS12) | (1 << CS10);
+  /* Timer/Counter1 Compare Match A interrupt enabled */
+  TIMSK1 = (1 << OCIE1A);
+  /* set TOP so that it is reached every 1s */
+  OCR1A = 15624;
+  sei();
+}
+
+int main() {
+  dig = nb = 0;
+
+  break_down(nb);
   uart_init();
   i2c_init();
   led_init();
   init_timer();
 
-  while (1) {
-    break_down(nb);
-    _delay_ms(1000);
-    iter_plus(nb, 9999);
-  }
+  while (1) {}
   return 0;
 }
