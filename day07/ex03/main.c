@@ -1,18 +1,16 @@
+#include <avr/interrupt.h>
 #include <avr/io.h>
 #include <util/delay.h>
-#include <avr/interrupt.h>
 
 #ifndef F_CPU
 #define F_CPU 16000000UL
 #endif
 
-long ft_pow(int base, int power)
-{
-	long result = 1;
+long ft_pow(int base, int power) {
+  long result = 1;
 
-	while (power--)
-		result *= base;
-	return (result);
+  while (power--) result *= base;
+  return (result);
 }
 
 /* ******************** UART ******************** */
@@ -57,13 +55,14 @@ void adc_init_temp() {
   ADMUX = (1 << REFS0) | (1 << REFS1);
 
   /* ADC Enable and prescaler of 128. 16000000/128 = 125000 */
-  ADCSRA = (1 << ADEN) | (1 << ADPS2 ) | (1 << ADPS1) | (1 << ADPS0);
+  ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0);
 }
 
 uint16_t adc_read_temp() {
   ADMUX = (ADMUX & 0xF8) | 8; /* clears the bottom 3 bits before ORing */
-  ADCSRA |= (1 << ADSC); /* start single convertion */
-  while(ADCSRA & (1 << ADSC)); /* wait for conversion to complete */
+  ADCSRA |= (1 << ADSC);      /* start single convertion */
+  while (ADCSRA & (1 << ADSC))
+    ; /* wait for conversion to complete */
 
   /* (ds: 28.8) Celsius temperature formula:
    * T = { [(ADCH << 8) | ADCL] - TOS} / k = ADC - 342 (with TOS=342, k=1)*/
@@ -81,21 +80,20 @@ uint16_t adc_read_temp() {
 
 void print_dec_value(uint16_t n) {
   unsigned char value[5] = {0};
-	unsigned int e = n / 10;
-	uint16_t res;
-	uint16_t i = 1;
+  unsigned int e = n / 10;
+  uint16_t res;
+  uint16_t i = 1;
 
-	while (e) {
-		e /= 10;
-		i++;
-	}
-	while (i--)
-	{
-		res = ((n / ft_pow(10, e++)) % 10);
-		res += 48;
-		value[i] = res;
-	}
-  uart_printstr((char*)value);
+  while (e) {
+    e /= 10;
+    i++;
+  }
+  while (i--) {
+    res = ((n / ft_pow(10, e++)) % 10);
+    res += 48;
+    value[i] = res;
+  }
+  uart_printstr((char *)value);
 }
 
 int main() {

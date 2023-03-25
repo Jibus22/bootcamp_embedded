@@ -1,6 +1,6 @@
+#include <avr/interrupt.h>
 #include <avr/io.h>
 #include <util/delay.h>
-#include <avr/interrupt.h>
 
 #ifndef F_CPU
 #define F_CPU 16000000UL
@@ -24,25 +24,32 @@ uint8_t SPI_MasterTransmit(uint8_t cData) {
   /* Start transmission */
   SPDR = cData;
   /* Wait for transmission complete */
-  while(!(SPSR & (1 << SPIF)));
+  while (!(SPSR & (1 << SPIF)))
+    ;
   return SPDR;
 }
 
 /* ******************** APA102 ******************** */
 
 void apa102_start_frame() {
-  for (int i = 0; i < 4; i++) { SPI_MasterTransmit(0x00); }
+  for (int i = 0; i < 4; i++) {
+    SPI_MasterTransmit(0x00);
+  }
 }
 
 void apa102_end_frame() {
-  for (int i = 0; i < 4; i++) { SPI_MasterTransmit(0xFF); }
+  for (int i = 0; i < 4; i++) {
+    SPI_MasterTransmit(0xFF);
+  }
 }
 
 void apa102_led_frame(uint8_t brightness, uint8_t r, uint8_t g, uint8_t b) {
   brightness &= 0b00011111; /* Make sure ch value is between 0 and 31 */
   brightness |= 0xE0; /* Set 3 msb bits to one as a start for led frame. */
   uint8_t led_frame[4] = {brightness, b, g, r};
-  for (int i = 0; i < 4; i++) { SPI_MasterTransmit(led_frame[i]); }
+  for (int i = 0; i < 4; i++) {
+    SPI_MasterTransmit(led_frame[i]);
+  }
 }
 
 /* ******************** PGM ******************** */
@@ -54,6 +61,7 @@ int main() {
   apa102_led_frame(0x00, 0x00, 0x00, 0x00);
   apa102_led_frame(0x00, 0x00, 0x00, 0x00);
   apa102_end_frame();
-  while (1) {};
+  while (1) {
+  };
   return 0;
 }

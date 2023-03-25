@@ -1,11 +1,10 @@
+#include <avr/interrupt.h>
 #include <avr/io.h>
 #include <util/delay.h>
-#include <avr/interrupt.h>
 
 #ifndef F_CPU
 #define F_CPU 16000000UL
 #endif
-
 
 int ft_isprint(unsigned char c) { return ((c >= 32 && c <= 126)); }
 
@@ -77,23 +76,30 @@ uint8_t SPI_MasterTransmit(uint8_t cData) {
   /* Start transmission */
   SPDR = cData;
   /* Wait for transmission complete */
-  while(!(SPSR & (1 << SPIF)));
+  while (!(SPSR & (1 << SPIF)))
+    ;
   return SPDR;
 }
 
 /* ******************** APA102 ******************** */
 
 void apa102_start_frame() {
-  for (int i = 0; i < 4; i++) { SPI_MasterTransmit(0x00); }
+  for (int i = 0; i < 4; i++) {
+    SPI_MasterTransmit(0x00);
+  }
 }
 
 void apa102_end_frame() {
-  for (int i = 0; i < 4; i++) { SPI_MasterTransmit(0xFF); }
+  for (int i = 0; i < 4; i++) {
+    SPI_MasterTransmit(0xFF);
+  }
 }
 
 void apa102_led_frame(uint8_t brightness, uint8_t r, uint8_t g, uint8_t b) {
   uint8_t led_frame[4] = {((brightness & 0x1F) | 0xE0), b, g, r};
-  for (int i = 0; i < 4; i++) { SPI_MasterTransmit(led_frame[i]); }
+  for (int i = 0; i < 4; i++) {
+    SPI_MasterTransmit(led_frame[i]);
+  }
 }
 
 /* ******************** PGM ******************** */
@@ -103,12 +109,13 @@ void apa102_led_frame(uint8_t brightness, uint8_t r, uint8_t g, uint8_t b) {
 #define BRIGHT 1 /* brightness strength: 0 to 31 */
 
 void set_apa_led(uint8_t led, uint8_t rgb[3]) {
-  uint8_t led_type[3] = {1,2,4};
+  uint8_t led_type[3] = {1, 2, 4};
 
   led &= 0x07;
   apa102_start_frame();
   for (uint8_t i = 0; i < 3; i++) {
-    apa102_led_frame(((led & led_type[i]) > 0) * BRIGHT, rgb[0], rgb[1], rgb[2]);
+    apa102_led_frame(((led & led_type[i]) > 0) * BRIGHT, rgb[0], rgb[1],
+                     rgb[2]);
   }
   apa102_end_frame();
 }
@@ -128,7 +135,6 @@ void prompt(char *buf) {
   char c;
 
   while (i < BUFLEN) {
-
     c = uart_rx();
 
     if (i == BUFLEN - 1) {
@@ -157,16 +163,16 @@ void prompt(char *buf) {
   }
 }
 
-uint8_t	ft_atox(const char *str) {
-	uint8_t nbr;
-	int i = 0;
+uint8_t ft_atox(const char *str) {
+  uint8_t nbr;
+  int i = 0;
 
-	nbr = 0;
-	while (i < 2) {
-		nbr = nbr * 16 + (str[i] - ((str[i] >= 48 && str[i] <= 57) ? 48 : 55));
+  nbr = 0;
+  while (i < 2) {
+    nbr = nbr * 16 + (str[i] - ((str[i] >= 48 && str[i] <= 57) ? 48 : 55));
     i++;
   }
-	return nbr;
+  return nbr;
 }
 
 int convert_input(uint8_t *rgb, const char *buf) {
@@ -174,14 +180,12 @@ int convert_input(uint8_t *rgb, const char *buf) {
   int found, led;
 
   led = ((buf[8] == '6') * 1) + ((buf[8] == '7') * 2) + ((buf[8] == '8') * 4);
-  if (buf[0] != '#' || buf[7] != 'D' || !led || buf[9])
-    return 0;
+  if (buf[0] != '#' || buf[7] != 'D' || !led || buf[9]) return 0;
 
   for (int i = 1; i < 7; i++) {
     found = 0;
     for (int j = 0; j < 16; j++)
-      if (buf[i] == hexa[j])
-        found = 1;
+      if (buf[i] == hexa[j]) found = 1;
     if (!found) return 0;
   }
   rgb[0] = ft_atox(&buf[1]);
@@ -192,8 +196,8 @@ int convert_input(uint8_t *rgb, const char *buf) {
 
 volatile uint8_t pos;
 
-void set_rgb(uint8_t r, uint8_t g, uint8_t b){
-  set_apa_led(0x7, (uint8_t[3]){r,g,b});
+void set_rgb(uint8_t r, uint8_t g, uint8_t b) {
+  set_apa_led(0x7, (uint8_t[3]){r, g, b});
 }
 
 void wheel(uint8_t pos) {
@@ -237,7 +241,7 @@ int main() {
   while (1) {
     ft_bzero(buf, BUFLEN);
     prompt(buf);
-    
+
     led = convert_input(rgb, buf);
     if (led) {
       TCCR1B &= ~((1 << CS12) | (1 << CS10)); /* stop timer */
@@ -245,8 +249,7 @@ int main() {
     } else {
       if (!ft_strcmp(buf, "#FULLRAINBOW")) {
         TCCR1B |= ((1 << CS12) | (1 << CS10)); /* start timer */
-      }
-      else
+      } else
         uart_printstr("error: wrong input. Usage: #RRGGBBDX\r\n");
     }
   }

@@ -1,6 +1,6 @@
 #include <avr/io.h>
-#include <util/twi.h>
 #include <util/delay.h>
+#include <util/twi.h>
 
 #ifndef F_CPU
 #define F_CPU 16000000UL
@@ -23,13 +23,15 @@ void uart_init() {
 }
 
 void uart_tx(char c) {
-  while (!(UCSR0A & (1 << UDRE0))); /* wait for transmit buffer to be empty */
+  while (!(UCSR0A & (1 << UDRE0)))
+    ;       /* wait for transmit buffer to be empty */
   UDR0 = c; /* load data into transmit register */
 }
 
 char uart_rx(void) {
   /* (ds: 24.8 Data Reception) Wait for data to be received */
-  while (!(UCSR0A & (1 << RXC0)));
+  while (!(UCSR0A & (1 << RXC0)))
+    ;
   return UDR0; /* Get and return received data from buffer */
 }
 
@@ -39,34 +41,37 @@ void uart_printstr(const char *str) {
 
 /* ******************** TWI utils ******************** */
 
-long ft_pow(int base, int power)
-{
-	long result = 1;
+long ft_pow(int base, int power) {
+  long result = 1;
 
-	while (power--)
-		result *= base;
-	return (result);
+  while (power--) result *= base;
+  return (result);
 }
 
 void print_status(const char *id) {
   uart_printstr(id);
   uart_printstr("\n\r    ");
 
-  switch(TWSR & 0xF8) {
+  switch (TWSR & 0xF8) {
     case TW_START:
       return uart_printstr("A START condition has been transmitted\r\n");
     case TW_REP_START:
-      return uart_printstr("A repeated START condition has been transmitted\r\n");
+      return uart_printstr(
+          "A repeated START condition has been transmitted\r\n");
     case TW_MT_SLA_ACK:
-      return uart_printstr("SLA+W has been transmitted; ACK has been received\r\n");
+      return uart_printstr(
+          "SLA+W has been transmitted; ACK has been received\r\n");
     case TW_MT_SLA_NACK:
-      return uart_printstr("SLA+W has been transmitted;"
+      return uart_printstr(
+          "SLA+W has been transmitted;"
           "NOT ACK has been received\r\n");
     case TW_MT_DATA_ACK:
-      return uart_printstr("Data byte has been transmitted;"
+      return uart_printstr(
+          "Data byte has been transmitted;"
           "ACK has been received\r\n");
     case TW_MT_DATA_NACK:
-      return uart_printstr("Data byte has been transmitted;"
+      return uart_printstr(
+          "Data byte has been transmitted;"
           "NOT ACK has been received\r\n");
     case TW_MT_ARB_LOST:
       return uart_printstr("Arbitration lost in SLA+W or data bytes\r\n");
@@ -77,24 +82,23 @@ void print_status(const char *id) {
 
 void print_hex_value(unsigned char n) {
   unsigned char value[3] = {0};
-	unsigned int e = n / 16;
-	short int res;
-	int i = 1;
+  unsigned int e = n / 16;
+  short int res;
+  int i = 1;
 
-	while (e) {
-		e /= 16;
-		i++;
-	}
-	while (i--)
-	{
-		res = ((n / ft_pow(16, e++)) % 16);
-		if (res < 10)
-			res += 48;
-		else
-			res += 87;
-		value[i] = res;
-	}
-  uart_printstr((char*)value);
+  while (e) {
+    e /= 16;
+    i++;
+  }
+  while (i--) {
+    res = ((n / ft_pow(16, e++)) % 16);
+    if (res < 10)
+      res += 48;
+    else
+      res += 87;
+    value[i] = res;
+  }
+  uart_printstr((char *)value);
   uart_printstr(" ");
 }
 
@@ -102,14 +106,15 @@ void print_hex_value(unsigned char n) {
 
 #define SCL 100000UL /* I2C SCL at 100kHz */
 
-#define ERROR(msg) \
-  do {                    \
+#define ERROR(msg)     \
+  do {                 \
     print_status(msg); \
-    return;               \
+    return;            \
   } while (0)
 
 #define WAIT_I2C(reg) \
-  do {} while (!(reg & (1 << TWINT)))
+  do {                \
+  } while (!(reg & (1 << TWINT)))
 
 #define ACK_TYPE(type) ((TWSR & 0xF8) == (type))
 
@@ -125,12 +130,12 @@ void i2c_stop() {
 }
 
 void i2c_write(uint8_t data) {
-  TWDR = data; /* Load data into Data Register */
+  TWDR = data;                       /* Load data into Data Register */
   TWCR = (1 << TWINT) | (1 << TWEN); /* Start transmision */
 
   WAIT_I2C(TWCR); /* Wait confirmation TWI interface sent DATA */
 
-  /* Check ACK of DATA */ 
+  /* Check ACK of DATA */
   if (!ACK_TYPE(TW_MT_DATA_ACK)) ERROR("W data failed\n\r");
 }
 
@@ -154,12 +159,12 @@ char i2c_read(char type) {
 
 /* Send slave address */
 void i2c_transmit_addr(char addr, char type) {
-  TWDR = (addr << 1) + type; /* Load 7bits addr + R/W bit */
+  TWDR = (addr << 1) + type;         /* Load 7bits addr + R/W bit */
   TWCR = (1 << TWINT) | (1 << TWEN); /* Start transmision */
 
   WAIT_I2C(TWCR); /* Wait confirmation TWI interface sent SLA+W/R */
 
-  /* Check ACK of SLAVE ADDRESS */ 
+  /* Check ACK of SLAVE ADDRESS */
   if (!ACK_TYPE(type == ADDR_W ? TW_MT_SLA_ACK : TW_MR_SLA_ACK))
     ERROR("W addr failed\n\r");
 }
@@ -171,7 +176,7 @@ void i2c_start() {
 
   WAIT_I2C(TWCR); /* Wait confirmation TWI interface sent START */
   if (!ACK_TYPE(TW_START) && !ACK_TYPE(TW_REP_START))
-    ERROR("start failed\n\r"); /* Check ACK of START or REP_START */ 
+    ERROR("start failed\n\r"); /* Check ACK of START or REP_START */
 }
 
 /* ******************** PCA9555 EXPANDER  ******************** */
@@ -236,10 +241,12 @@ uint8_t pca9555_read(uint8_t cmd) {
  * input direction */
 void led_init() {
   /* Set led pins direction to ouput */
-  pca9555_write(CMD_CONF_P0, PCA9555_SET_OUT(0xFF, DIG_1 | DIG_2 | DIG_3 | DIG_4));
+  pca9555_write(CMD_CONF_P0,
+                PCA9555_SET_OUT(0xFF, DIG_1 | DIG_2 | DIG_3 | DIG_4));
   pca9555_write(CMD_CONF_P1, PCA9555_SET_OUT(0xFF, 0xFF));
   /* Set leds to off */
-  pca9555_write(CMD_OUT_P0, PCA9555_SET_IN(0xFF, DIG_1 | DIG_2 | DIG_3 | DIG_4));
+  pca9555_write(CMD_OUT_P0,
+                PCA9555_SET_IN(0xFF, DIG_1 | DIG_2 | DIG_3 | DIG_4));
   pca9555_write(CMD_OUT_P1, PCA9555_SET_IN(0xFF, 0xFF));
 }
 
@@ -250,17 +257,18 @@ void led_init() {
 #define SET_NB(nb) pca9555_write(CMD_OUT_P1, PCA9555_SET_OUT(0xFF, nb));
 
 int main() {
-  uint8_t i = 0,
-          digit[2] = {DIG_3, DIG_4},
+  uint8_t i = 0, digit[2] = {DIG_3, DIG_4},
           numbers[2] = {
-                         SEG_A | SEG_E | SEG_D | SEG_DOT,
-                         SEG_F | SEG_C | SEG_DOT,
-                        };
+              SEG_A | SEG_E | SEG_D | SEG_DOT,
+              SEG_F | SEG_C | SEG_DOT,
+          };
   uart_init();
   i2c_init();
   led_init();
 
   while (1) {
+    pca9555_write(CMD_OUT_P0,
+                  PCA9555_SET_IN(0xFF, DIG_1 | DIG_2 | DIG_3 | DIG_4));
     SET_NB(numbers[i]);
     SET_DIGIT(digit[i]);
     iter_plus(i, 1);

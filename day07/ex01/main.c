@@ -1,18 +1,16 @@
+#include <avr/interrupt.h>
 #include <avr/io.h>
 #include <util/delay.h>
-#include <avr/interrupt.h>
 
 #ifndef F_CPU
 #define F_CPU 16000000UL
 #endif
 
-long ft_pow(int base, int power)
-{
-	long result = 1;
+long ft_pow(int base, int power) {
+  long result = 1;
 
-	while (power--)
-		result *= base;
-	return (result);
+  while (power--) result *= base;
+  return (result);
 }
 
 /* ******************** UART ******************** */
@@ -54,16 +52,17 @@ void adc_init() {
   ADMUX = (1 << REFS0) | (1 << ADLAR); /* AREF = AVcc, left adjusted */
 
   /* ADC Enable and prescaler of 128. 16000000/128 = 125000 */
-  ADCSRA = (1 << ADEN) | (1 << ADPS2 ) | (1 << ADPS1) | (1 << ADPS0);
+  ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0);
 }
 
 uint8_t adc_read(uint8_t ch) {
-  ch &= 0b00000111; /* Make sure ch value is between 0 and 7 */
+  ch &= 0b00000111;            /* Make sure ch value is between 0 and 7 */
   ADMUX = (ADMUX & 0xF8) | ch; /* clears the bottom 3 bits before ORing */
 
   ADCSRA |= (1 << ADSC); /* start single convertion */
 
-  while(ADCSRA & (1 << ADSC)); /* wait for conversion to complete */
+  while (ADCSRA & (1 << ADSC))
+    ; /* wait for conversion to complete */
 
   /* with result left adjusted and reading ADCH only returns a 8bit
    * resolution result */
@@ -81,24 +80,23 @@ uint8_t adc_read(uint8_t ch) {
 
 void print_hex_value(unsigned char n) {
   unsigned char value[3] = {0};
-	unsigned int e = n / 16;
-	short int res;
-	int i = 1;
+  unsigned int e = n / 16;
+  short int res;
+  int i = 1;
 
-	while (e) {
-		e /= 16;
-		i++;
-	}
-	while (i--)
-	{
-		res = ((n / ft_pow(16, e++)) % 16);
-		if (res < 10)
-			res += 48;
-		else
-			res += 87;
-		value[i] = res;
-	}
-  uart_printstr((char*)value);
+  while (e) {
+    e /= 16;
+    i++;
+  }
+  while (i--) {
+    res = ((n / ft_pow(16, e++)) % 16);
+    if (res < 10)
+      res += 48;
+    else
+      res += 87;
+    value[i] = res;
+  }
+  uart_printstr((char *)value);
 }
 
 int main() {
