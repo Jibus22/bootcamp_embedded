@@ -90,7 +90,7 @@ void apa102_led_frame(uint8_t brightness, uint8_t r, uint8_t g, uint8_t b) {
 #define COLORS_NB 3
 #define BRIGHT 1 /* brightness strength: 0 to 31 */
 
-void set_apa_led(uint8_t led, uint8_t rgb[3]) {
+void set_apa_led(uint8_t led, const uint8_t rgb[3]) {
   uint8_t led_type[3] = {1, 2, 4};
 
   led &= 0x07;
@@ -559,14 +559,10 @@ static void led_binary_display(uint8_t nb) {
 
 volatile uint8_t mode_select;
 
-void adc_display_mode_init(void (*adc_select)(uint8_t), uint8_t adc,
+void adc_display_mode_init(void (*adc_channel_select)(uint8_t), uint8_t adc,
                            uint8_t voltage_reference) {
   adc_init_10bits_autotrigger(voltage_reference);
-  adc_select(adc);
-
-  set_timer0(TC_CLEAR);
-  set_timer1(TC_CLEAR);
-  set_timer2(TC_CLEAR);
+  adc_channel_select(adc);
 
   /* tc0 used to trigger adc at each OV */
   set_timer0(0x00, 0x00, TC0_PRESCALER_1024, 0x00, 0x00);
@@ -575,9 +571,6 @@ void adc_display_mode_init(void (*adc_select)(uint8_t), uint8_t adc,
 }
 
 DECL_MODE_INIT(mode4_init) {
-  set_timer0(TC_CLEAR);
-  set_timer1(TC_CLEAR);
-  set_timer2(TC_CLEAR);
   /* tc2 used to display led screen at compA match. mode 2 ctc */
   set_timer2(TC2_MODE2_A, TC2_MODE2_B, TC2_PRESCALER_1024, TC2_COMPA, 70);
   /* tc1 used to count every seconds */
@@ -585,8 +578,6 @@ DECL_MODE_INIT(mode4_init) {
 }
 
 DECL_MODE_INIT(temp_init) {
-  CLEAR_APA_LED;
-  CLEAR_LED(PORTD, (LED_D5_R | LED_D5_G | LED_D5_B));
   adc_display_mode_init(adc_set_read_temp, 0, ADC_VOLTAGE_INTERNAL);
 }
 
@@ -599,8 +590,6 @@ DECL_MODE_INIT(ldr_init) {
 }
 
 DECL_MODE_INIT(rv1_init) {
-  CLEAR_APA_LED;
-  CLEAR_LED(PORTD, (LED_D5_R | LED_D5_G | LED_D5_B));
   adc_display_mode_init(adc_set_channel, ADC_RV1, ADC_VOLTAGE_AVCC);
 }
 
@@ -625,32 +614,27 @@ DECL_ADC_MODE(display_adc_value) {
   }
 }
 
-static void (*adc_mode[MAX_MODE_NB])(uint16_t) = {
-    display_adc_value, display_adc_value, display_adc_value, display_adc_temp,
-    adc_nul};
-
-/* ******************** LED_SCREEN_DISPLAY ******************** */
-
-#define DECL_LED_DISPLAY_MODE(name) static void name(void)
-
-static void (*led_screen_display_mode[MAX_MODE_NB])() = {
-    led_screen_display_nb, led_screen_display_nb, led_screen_display_nb,
-    led_screen_display_nb, led_screen_display_42};
-
-/* ISR triggered every 4ms to display one of four led digits and shift the
- * index of the next digit to display */
-ISR(TIMER2_COMPA_vect) { led_screen_display_mode[mode_select](); }
-
-/* ******************** PGM ******************** */
+/* ******************** ISR ******************** */
 
 volatile uint8_t cnt;
 
-/* triggered every seconds */
+/* ISR used to display one of four led digits and shift the index of the
+ * next digit to display */
+ISR(TIMER2_COMPA_vect) {
+  static const void (*led_screen_display_mode[MAX_MODE_NB])() = {
+      led_screen_display_nb, led_screen_display_nb, led_screen_display_nb,
+      led_screen_display_nb, led_screen_display_42};
+
+  led_screen_display_mode[mode_select]();
+}
+
+/* display led, switch colors, mode 4 */
 ISR(TIMER1_COMPB_vect) {
-  static const char led_rgb[3] = {LED_D5_R, LED_D5_G, LED_D5_B};
-  static uint8_t col_idx = 0, colors[COLORS_NB][3] = {{0xff, 0x00, 0x00},
-                                                      {0x00, 0xff, 0x00},
-                                                      {0x00, 0x00, 0xff}};
+  static uint8_t col_idx = 0;
+  static const uint8_t led_rgb[3] = {LED_D5_R, LED_D5_G, LED_D5_B},
+                       colors[COLORS_NB][3] = {{0xff, 0x00, 0x00},
+                                               {0x00, 0xff, 0x00},
+                                               {0x00, 0x00, 0xff}};
 
   CLEAR_LED(PORTD, (LED_D5_R | LED_D5_G | LED_D5_B));
   SET_LED(PORTD, led_rgb[col_idx]);
@@ -658,7 +642,7 @@ ISR(TIMER1_COMPB_vect) {
   iter_inc(col_idx, COLORS_NB - 1);
 }
 
-/* triggered every seconds */
+/* start routine */
 ISR(TIMER1_COMPA_vect) {
   cnt++;
   if (cnt == 3) {
@@ -671,13 +655,53 @@ ISR(TIMER1_COMPA_vect) {
   }
 }
 
-/* autotriggered by TC0 overflow */
+/* autotriggered by TC0 overflow. read and display adc value. */
 ISR(ADC_vect) {
+  static const void (*adc_mode[MAX_MODE_NB])(uint16_t) = {
+      display_adc_value, display_adc_value, display_adc_value, display_adc_temp,
+      adc_nul};
   uint16_t val = ADC;
 
   adc_mode[mode_select](val);
 
   TIFR0 = (1 << TOV0);
+}
+
+/* ******************** MAIN ******************** */
+
+void mode_init_decorator(void (*cb)(), uint8_t mode) {
+  led_binary_display(mode);
+
+  CLEAR_APA_LED;
+  CLEAR_LED(PORTD, (LED_D5_R | LED_D5_G | LED_D5_B));
+  set_timer0(TC_CLEAR);
+  set_timer1(TC_CLEAR);
+  set_timer2(TC_CLEAR);
+
+  cb();
+}
+
+void loop() {
+  static const void (*mode_set[MAX_MODE_NB])() = {rv1_init, ldr_init, ntc_init,
+                                                  temp_init, mode4_init};
+
+  mode_init_decorator(mode_set[mode_select], mode_select);
+  while (1) {
+    if (BUTTON_PUSHED(PIND, SW1)) {
+      iter_inc(mode_select, MAX_MODE_NB - 1);
+      mode_init_decorator(mode_set[mode_select], mode_select);
+      _delay_ms(DEBOUNCE_DLY);
+      WAIT_RELEASE_BUTTON(PIND, SW1);
+      _delay_ms(DEBOUNCE_DLY);
+    }
+    if (BUTTON_PUSHED(PIND, SW2)) {
+      iter_dec(mode_select, MAX_MODE_NB - 1);
+      mode_init_decorator(mode_set[mode_select], mode_select);
+      _delay_ms(DEBOUNCE_DLY);
+      WAIT_RELEASE_BUTTON(PIND, SW2);
+      _delay_ms(DEBOUNCE_DLY);
+    }
+  }
 }
 
 void start_routine() {
@@ -711,32 +735,6 @@ void start_routine() {
       _delay_ms(DEBOUNCE_DLY);
     }
     _delay_ms(20);
-  }
-}
-
-void loop() {
-  void (*mode_init[MAX_MODE_NB])() = {rv1_init, ldr_init, ntc_init, temp_init,
-                                      mode4_init};
-
-  led_binary_display(mode_select);
-  mode_init[mode_select]();
-  while (1) {
-    if (BUTTON_PUSHED(PIND, SW1)) {
-      iter_inc(mode_select, MAX_MODE_NB - 1);
-      led_binary_display(mode_select);
-      mode_init[mode_select]();
-      _delay_ms(DEBOUNCE_DLY);
-      WAIT_RELEASE_BUTTON(PIND, SW1);
-      _delay_ms(DEBOUNCE_DLY);
-    }
-    if (BUTTON_PUSHED(PIND, SW2)) {
-      iter_dec(mode_select, MAX_MODE_NB - 1);
-      led_binary_display(mode_select);
-      mode_init[mode_select]();
-      _delay_ms(DEBOUNCE_DLY);
-      WAIT_RELEASE_BUTTON(PIND, SW2);
-      _delay_ms(DEBOUNCE_DLY);
-    }
   }
 }
 
