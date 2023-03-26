@@ -43,6 +43,67 @@ void uart_printstr(const char *str) {
   while (*str) uart_tx(*str++);
 }
 
+/* ******************** SPI ******************** */
+
+#define SPI_DDR DDRB
+#define SS PINB2
+#define MOSI PINB3
+#define SCK PINB5
+
+void SPI_MasterInit(void) {
+  /* Set MOSI, Slave Select and SCK output, all others input */
+  SPI_DDR |= (1 << MOSI) | (1 << SCK) | (1 << SS);
+  /* Enable SPI, Master, set clock rate fck/16 */
+  SPCR = (1 << SPE) | (1 << MSTR) | (1 << SPR0);
+}
+
+uint8_t SPI_MasterTransmit(uint8_t cData) {
+  /* Start transmission */
+  SPDR = cData;
+  /* Wait for transmission complete */
+  while (!(SPSR & (1 << SPIF)))
+    ;
+  return SPDR;
+}
+
+/* ******************** APA102 ******************** */
+
+void apa102_start_frame() {
+  for (int i = 0; i < 4; i++) {
+    SPI_MasterTransmit(0x00);
+  }
+}
+
+void apa102_end_frame() {
+  for (int i = 0; i < 4; i++) {
+    SPI_MasterTransmit(0xFF);
+  }
+}
+
+void apa102_led_frame(uint8_t brightness, uint8_t r, uint8_t g, uint8_t b) {
+  uint8_t led_frame[4] = {((brightness & 0x1F) | 0xE0), b, g, r};
+  for (int i = 0; i < 4; i++) {
+    SPI_MasterTransmit(led_frame[i]);
+  }
+}
+
+#define COLORS_NB 3
+#define BRIGHT 1 /* brightness strength: 0 to 31 */
+
+void set_apa_led(uint8_t led, uint8_t rgb[3]) {
+  uint8_t led_type[3] = {1, 2, 4};
+
+  led &= 0x07;
+  apa102_start_frame();
+  for (uint8_t i = 0; i < 3; i++) {
+    apa102_led_frame(((led & led_type[i]) > 0) * BRIGHT, rgb[0], rgb[1],
+                     rgb[2]);
+  }
+  apa102_end_frame();
+}
+
+#define CLEAR_APA_LED set_apa_led(0x00, (uint8_t[3]){0x00, 0x00, 0x00});
+
 /* ******************** TWI utils ******************** */
 
 long ft_pow(int base, int power) {
@@ -368,6 +429,7 @@ void i2c_expander_init_port1() {
 #define TC1_MODE4_B ((1 << WGM12))
 #define TC1_PRESCALER_1024 ((1 << CS12) | (1 << CS10))
 #define TC1_COMPA ((1 << OCIE1A))
+#define TC1_COMPB ((1 << OCIE1B))
 
 /* TIMER/COUNTER 2 SETTINGS */
 #define TC2_MODE2_A ((1 << WGM21))
@@ -426,10 +488,23 @@ static const uint8_t digit[4] = {DIG_1, DIG_2, DIG_3, DIG_4},
                          SEG_E | SEG_DOT,
 };
 
-/* Se fait trigger ttes les 10 ms */
-static void led_display_nb() {
+static void led_screen_display_nb() {
   CLEAR_DIGIT(DIG_1 | DIG_2 | DIG_3 | DIG_4);
   SET_NB(numbers[nbrs[dig]]);
+  SET_DIGIT(digit[dig]);
+  iter_inc(dig, 3);
+}
+
+static void led_screen_display_42() {
+  static const uint8_t displayft[4] = {
+                         SEG_A | SEG_B | SEG_C | SEG_D | SEG_E |SEG_F | SEG_DOT,
+                         SEG_A | SEG_E | SEG_D | SEG_DOT,
+                         SEG_F | SEG_C | SEG_DOT,
+                         SEG_A | SEG_B | SEG_C | SEG_D | SEG_E |SEG_F | SEG_DOT,
+  };
+
+  CLEAR_DIGIT(DIG_1 | DIG_2 | DIG_3 | DIG_4);
+  SET_NB(displayft[dig]);
   SET_DIGIT(digit[dig]);
   iter_inc(dig, 3);
 }
@@ -448,11 +523,19 @@ static void break_down(uint16_t n) {
   for (uint8_t k = 0; k < 4; k++) nbrs[k] = result[k];
 }
 
-/* ISR triggered every 4ms to display one of four led digits and shift the
- * index of the next digit to display */
-ISR(TIMER2_COMPA_vect) { led_display_nb(); }
-
 /* ******************** LED ******************** */
+
+#define SET_LED(port, led) port |= (led)
+#define CLEAR_LED(port, led) port &= ~(led)
+
+#define LED_D5_R (1 << PD5)
+#define LED_D5_G (1 << PD6)
+#define LED_D5_B (1 << PD3)
+
+static void led_rgb_init() {
+  DDRD |= LED_D5_R | LED_D5_G | LED_D5_B;
+  CLEAR_LED(PORTD, (LED_D5_R | LED_D5_G | LED_D5_B));
+}
 
 #define LED_D1 (1 << 0)
 #define LED_D2 (1 << 1)
@@ -475,7 +558,7 @@ static void led_binary_display(uint8_t nb) {
 
 /* ******************** MODE_SELECTION ******************** */
 
-#define MAX_MODE_NB 4
+#define MAX_MODE_NB 5
 
 #define DECL_MODE_INIT(name) \
   static void name()
@@ -490,6 +573,7 @@ void adc_display_mode_init(void (*adc_select)(uint8_t),
   adc_select(adc);
 
   set_timer0(TC_CLEAR);
+  set_timer1(TC_CLEAR);
   set_timer2(TC_CLEAR);
 
   /* tc0 used to trigger adc at each OV */
@@ -498,7 +582,20 @@ void adc_display_mode_init(void (*adc_select)(uint8_t),
   set_timer2(TC2_MODE2_A, TC2_MODE2_B, TC2_PRESCALER_1024, TC2_COMPA, 70);
 }
 
+DECL_MODE_INIT(mode4_init) {
+
+  set_timer0(TC_CLEAR);
+  set_timer1(TC_CLEAR);
+  set_timer2(TC_CLEAR);
+  /* tc2 used to display led screen at compA match. mode 2 ctc */
+  set_timer2(TC2_MODE2_A, TC2_MODE2_B, TC2_PRESCALER_1024, TC2_COMPA, 70);
+  /* tc1 used to count every seconds */
+  set_timer1(TC1_MODE4_A, TC1_MODE4_B, TC1_PRESCALER_1024, TC1_COMPB, 15624);
+}
+
 DECL_MODE_INIT(temp_init) {
+  CLEAR_APA_LED;
+  CLEAR_LED(PORTD, (LED_D5_R | LED_D5_G | LED_D5_B));
   adc_display_mode_init(adc_set_read_temp, 0, ADC_VOLTAGE_INTERNAL);
 }
 
@@ -511,6 +608,8 @@ DECL_MODE_INIT(ldr_init) {
 }
 
 DECL_MODE_INIT(rv1_init) {
+  CLEAR_APA_LED;
+  CLEAR_LED(PORTD, (LED_D5_R | LED_D5_G | LED_D5_B));
   adc_display_mode_init(adc_set_channel, ADC_RV1, ADC_VOLTAGE_AVCC);
 }
 
@@ -537,12 +636,41 @@ DECL_ADC_MODE(display_adc_value) {
 }
 
 static void (*adc_mode[MAX_MODE_NB])(uint16_t) = {
-  display_adc_value, display_adc_value, display_adc_value, display_adc_temp
+  display_adc_value, display_adc_value, display_adc_value, display_adc_temp,
+  adc_nul
 };
+
+/* ******************** LED_SCREEN_DISPLAY ******************** */
+
+#define DECL_LED_DISPLAY_MODE(name) \
+  static void name(void)
+
+static void (*led_screen_display_mode[MAX_MODE_NB])() = {
+  led_screen_display_nb, led_screen_display_nb, led_screen_display_nb,
+  led_screen_display_nb, led_screen_display_42
+};
+
+/* ISR triggered every 4ms to display one of four led digits and shift the
+ * index of the next digit to display */
+ISR(TIMER2_COMPA_vect) { led_screen_display_mode[mode_select](); }
 
 /* ******************** PGM ******************** */
 
 volatile uint8_t cnt;
+
+/* triggered every seconds */
+ISR(TIMER1_COMPB_vect) {
+  static const char led_rgb[3] = {LED_D5_R, LED_D5_G, LED_D5_B};
+  static uint8_t col_idx = 0,
+                 colors[COLORS_NB][3] = {{0xff, 0x00, 0x00},
+                                         {0x00, 0xff, 0x00},
+                                         {0x00, 0x00, 0xff}};
+
+  CLEAR_LED(PORTD, (LED_D5_R | LED_D5_G | LED_D5_B));
+  SET_LED(PORTD, led_rgb[col_idx]);
+  set_apa_led(0x7, colors[col_idx]);
+  iter_inc(col_idx, COLORS_NB - 1);
+}
 
 /* triggered every seconds */
 ISR(TIMER1_COMPA_vect) {
@@ -599,7 +727,9 @@ void start_routine() {
 }
 
 void loop() {
-  void (*mode_init[MAX_MODE_NB])() = {rv1_init, ldr_init, ntc_init, temp_init};
+  void (*mode_init[MAX_MODE_NB])() = {
+    rv1_init, ldr_init, ntc_init, temp_init, mode4_init
+  };
 
   led_binary_display(mode_select);
   mode_init[mode_select]();
@@ -628,11 +758,15 @@ int main() {
   led_nb = 8888;
 
   break_down(led_nb);
+
   switch_init();
   led_init();
-  uart_init();
-  i2c_init();
+  led_rgb_init();
 
+  uart_init();
+  SPI_MasterInit();
+
+  i2c_init();
   i2c_expander_init_port0();
   i2c_expander_init_port1();
 
