@@ -7,8 +7,8 @@
 #define F_CPU 16000000UL
 #endif
 
-#define iter_inc(i, max) i = ((i != max) * (i + 1))
-#define iter_dec(i, max) i = (((i > 0) * (i - 1)) + ((i == 0) * max))
+#define iter_inc(i, max) i = ((i != (max)) * (i + 1))
+#define iter_dec(i, max) i = (((i > 0) * (i - 1)) + ((i == 0) * (max)))
 
 /* ******************** UART ******************** */
 
@@ -114,8 +114,12 @@ void print_hex_value(unsigned char n) {
 #define ADC_LDR ADC1
 #define ADC_NTC ADC2
 
-void adc_init_10bits_autotrigger() {
-  ADMUX = (1 << REFS0); /* AREF = AVcc */
+#define ADC_VOLTAGE_AVCC (1 << REFS0)
+#define ADC_VOLTAGE_INTERNAL ((1 << REFS0) | (1 << REFS1))
+
+void adc_init_10bits_autotrigger(uint8_t voltage_reference) {
+  ADMUX = voltage_reference;
+
   /* ADC Enable and prescaler of 128. 16000000/128 = 125000,
    * Auto Trigger Enable, ADC Interrupt Enable */
   ADCSRA = (1 << ADEN) | (1 << ADIE) | (1 << ADATE) | (1 << ADPS2) |
@@ -127,6 +131,11 @@ void adc_init_10bits_autotrigger() {
 void adc_set_channel(uint8_t ch) {
   ch &= 0b00000111;            /* Make sure ch value is between 0 and 7 */
   ADMUX = (ADMUX & 0xF8) | ch; /* clears the bottom 3 bits before ORing */
+}
+
+void adc_set_read_temp(uint8_t nul) {
+  (void)nul;
+  ADMUX = (ADMUX & 0xF8) | 8;
 }
 
 /* ******************** TWI ******************** */
@@ -466,7 +475,7 @@ static void led_binary_display(uint8_t nb) {
 
 /* ******************** MODE_SELECTION ******************** */
 
-#define MAX_MODE_NB (10 - 1)
+#define MAX_MODE_NB 4
 
 #define DECL_MODE_INIT(name) \
   static void name()
@@ -474,9 +483,11 @@ static void led_binary_display(uint8_t nb) {
 volatile uint8_t mode_select;
 
 
-void adc_display_mode_init(uint8_t adc) {
-  adc_init_10bits_autotrigger();
-  adc_set_channel(adc);
+void adc_display_mode_init(void (*adc_select)(uint8_t),
+                           uint8_t adc,
+                           uint8_t voltage_reference) {
+  adc_init_10bits_autotrigger(voltage_reference);
+  adc_select(adc);
 
   set_timer0(TC_CLEAR);
   set_timer2(TC_CLEAR);
@@ -487,16 +498,36 @@ void adc_display_mode_init(uint8_t adc) {
   set_timer2(TC2_MODE2_A, TC2_MODE2_B, TC2_PRESCALER_1024, TC2_COMPA, 70);
 }
 
-DECL_MODE_INIT(ntc_init) { adc_display_mode_init(ADC_NTC); }
+DECL_MODE_INIT(temp_init) {
+  adc_display_mode_init(adc_set_read_temp, 0, ADC_VOLTAGE_INTERNAL);
+}
 
-DECL_MODE_INIT(ldr_init) { adc_display_mode_init(ADC_LDR); }
+DECL_MODE_INIT(ntc_init) {
+  adc_display_mode_init(adc_set_channel, ADC_NTC, ADC_VOLTAGE_AVCC);
+}
 
-DECL_MODE_INIT(rv1_init) { adc_display_mode_init(ADC_RV1); }
+DECL_MODE_INIT(ldr_init) {
+  adc_display_mode_init(adc_set_channel, ADC_LDR, ADC_VOLTAGE_AVCC);
+}
+
+DECL_MODE_INIT(rv1_init) {
+  adc_display_mode_init(adc_set_channel, ADC_RV1, ADC_VOLTAGE_AVCC);
+}
 
 /* ******************** ADC_MODES ******************** */
 
 #define DECL_ADC_MODE(name) \
   static void name(uint16_t data)
+
+DECL_ADC_MODE(adc_nul) { (void)data; }
+
+DECL_ADC_MODE(display_adc_temp) {
+  data -= 342;
+  if (data != led_nb) {
+    led_nb = data;
+    break_down(led_nb);
+  }
+}
 
 DECL_ADC_MODE(display_adc_value) {
   if (data != led_nb) {
@@ -505,9 +536,9 @@ DECL_ADC_MODE(display_adc_value) {
   }
 }
 
-static void (*adc_mode[3])(uint16_t) = {display_adc_value,
-                                        display_adc_value,
-                                        display_adc_value};
+static void (*adc_mode[MAX_MODE_NB])(uint16_t) = {
+  display_adc_value, display_adc_value, display_adc_value, display_adc_temp
+};
 
 /* ******************** PGM ******************** */
 
@@ -531,6 +562,7 @@ ISR(ADC_vect) {
   uint16_t val = ADC;
 
   adc_mode[mode_select](val);
+
   TIFR0 = (1 << TOV0);
 }
 
@@ -567,13 +599,13 @@ void start_routine() {
 }
 
 void loop() {
-  void (*mode_init[3])() = {rv1_init, ldr_init, ntc_init};
+  void (*mode_init[MAX_MODE_NB])() = {rv1_init, ldr_init, ntc_init, temp_init};
 
   led_binary_display(mode_select);
   mode_init[mode_select]();
   while (1) {
     if (BUTTON_PUSHED(PIND, SW1)) {
-      iter_inc(mode_select, MAX_MODE_NB);
+      iter_inc(mode_select, MAX_MODE_NB - 1);
       led_binary_display(mode_select);
       mode_init[mode_select]();
       _delay_ms(DEBOUNCE_DLY);
@@ -581,7 +613,7 @@ void loop() {
       _delay_ms(DEBOUNCE_DLY);
     }
     if (BUTTON_PUSHED(PIND, SW2)) {
-      iter_dec(mode_select, MAX_MODE_NB);
+      iter_dec(mode_select, MAX_MODE_NB - 1);
       led_binary_display(mode_select);
       mode_init[mode_select]();
       _delay_ms(DEBOUNCE_DLY);
