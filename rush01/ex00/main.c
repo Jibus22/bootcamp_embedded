@@ -329,7 +329,7 @@ void pca9555_safe_write_port0(uint8_t data, uint8_t action) {
 }
 
 /* execute cb safely from interrupts */
-uint8_t int_safe(uint8_t(*cb)(uint8_t), uint8_t cmd) {
+uint8_t int_safe(uint8_t (*cb)(uint8_t), uint8_t cmd) {
   uint8_t ret;
 
   cli();
@@ -339,7 +339,7 @@ uint8_t int_safe(uint8_t(*cb)(uint8_t), uint8_t cmd) {
 }
 
 /* execute cb safely from interrupts */
-void int_safe2(void(*cb)(uint8_t, uint8_t), uint8_t data, uint8_t action) {
+void int_safe2(void (*cb)(uint8_t, uint8_t), uint8_t data, uint8_t action) {
   cli();
   cb(data, action);
   sei();
@@ -402,12 +402,12 @@ void switch_init() { DDRD &= ~(SW1 | SW2); }
 void i2c_expander_init_port0() {
   /* Set led pins direction of port0 to ouput, the rest to input */
   pca9555_write(CMD_CONF_P0,
-                PCA9555_SET_OUT(0xFF, DIG_1 | DIG_2 | DIG_3 | DIG_4 |
-                                LED_D9 | LED_D10 | LED_D11));
+                PCA9555_SET_OUT(0xFF, DIG_1 | DIG_2 | DIG_3 | DIG_4 | LED_D9 |
+                                          LED_D10 | LED_D11));
   /* Set leds to off */
   pca9555_write(CMD_OUT_P0,
-                PCA9555_SET_IN(0xFF, DIG_1 | DIG_2 | DIG_3 | DIG_4 |
-                                LED_D9 | LED_D10 | LED_D11));
+                PCA9555_SET_IN(0xFF, DIG_1 | DIG_2 | DIG_3 | DIG_4 | LED_D9 |
+                                         LED_D10 | LED_D11));
 }
 
 void i2c_expander_init_port1() {
@@ -419,7 +419,7 @@ void i2c_expander_init_port1() {
 
 /* ******************** TIMER ******************** */
 /* TC facilities */
-#define TC_CLEAR 0x00,0x00,0x00,0x00,0x00
+#define TC_CLEAR 0x00, 0x00, 0x00, 0x00, 0x00
 
 /* TIMER/COUNTER 0 SETTINGS */
 #define TC0_PRESCALER_1024 ((1 << CS02) | (1 << CS00))
@@ -465,12 +465,9 @@ static void set_timer2(uint8_t mode_a, uint8_t mode_b, uint8_t prescaler,
 }
 
 /* ******************** DIGIT DISPLAY LOGIC ******************** */
-#define SET_DIGIT(dig) \
-  pca9555_safe_write_port0(dig, PCA9555_SET);
-#define CLEAR_DIGIT(dig) \
-  pca9555_safe_write_port0(dig, PCA9555_CLEAR);
-#define SET_NB(nb) \
-  pca9555_write(CMD_OUT_P1, PCA9555_SET_OUT(0xFF, nb));
+#define SET_DIGIT(dig) pca9555_safe_write_port0(dig, PCA9555_SET);
+#define CLEAR_DIGIT(dig) pca9555_safe_write_port0(dig, PCA9555_CLEAR);
+#define SET_NB(nb) pca9555_write(CMD_OUT_P1, PCA9555_SET_OUT(0xFF, nb));
 
 volatile uint16_t led_nb;
 volatile uint8_t nbrs[4], dig;
@@ -497,10 +494,10 @@ static void led_screen_display_nb() {
 
 static void led_screen_display_42() {
   static const uint8_t displayft[4] = {
-                         SEG_A | SEG_B | SEG_C | SEG_D | SEG_E |SEG_F | SEG_DOT,
-                         SEG_A | SEG_E | SEG_D | SEG_DOT,
-                         SEG_F | SEG_C | SEG_DOT,
-                         SEG_A | SEG_B | SEG_C | SEG_D | SEG_E |SEG_F | SEG_DOT,
+      SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_F | SEG_DOT,
+      SEG_A | SEG_E | SEG_D | SEG_DOT,
+      SEG_F | SEG_C | SEG_DOT,
+      SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_F | SEG_DOT,
   };
 
   CLEAR_DIGIT(DIG_1 | DIG_2 | DIG_3 | DIG_4);
@@ -550,24 +547,19 @@ static void led_init() {
 /* Display nb in binary with leds */
 static void led_binary_display(uint8_t nb) {
   PORTB &= ~(LED_D1 | LED_D2 | LED_D3 | LED_D4);
-  PORTB |= (LED_D1 * ((nb & (1 << 0)) > 0)) |
-           (LED_D2 * ((nb & (1 << 1)) > 0)) |
-           (LED_D3 * ((nb & (1 << 2)) > 0)) |
-           (LED_D4 * ((nb & (1 << 3)) > 0));
+  PORTB |= (LED_D1 * ((nb & (1 << 0)) > 0)) | (LED_D2 * ((nb & (1 << 1)) > 0)) |
+           (LED_D3 * ((nb & (1 << 2)) > 0)) | (LED_D4 * ((nb & (1 << 3)) > 0));
 }
 
 /* ******************** MODE_SELECTION ******************** */
 
 #define MAX_MODE_NB 5
 
-#define DECL_MODE_INIT(name) \
-  static void name()
+#define DECL_MODE_INIT(name) static void name()
 
 volatile uint8_t mode_select;
 
-
-void adc_display_mode_init(void (*adc_select)(uint8_t),
-                           uint8_t adc,
+void adc_display_mode_init(void (*adc_select)(uint8_t), uint8_t adc,
                            uint8_t voltage_reference) {
   adc_init_10bits_autotrigger(voltage_reference);
   adc_select(adc);
@@ -583,7 +575,6 @@ void adc_display_mode_init(void (*adc_select)(uint8_t),
 }
 
 DECL_MODE_INIT(mode4_init) {
-
   set_timer0(TC_CLEAR);
   set_timer1(TC_CLEAR);
   set_timer2(TC_CLEAR);
@@ -615,8 +606,7 @@ DECL_MODE_INIT(rv1_init) {
 
 /* ******************** ADC_MODES ******************** */
 
-#define DECL_ADC_MODE(name) \
-  static void name(uint16_t data)
+#define DECL_ADC_MODE(name) static void name(uint16_t data)
 
 DECL_ADC_MODE(adc_nul) { (void)data; }
 
@@ -636,19 +626,16 @@ DECL_ADC_MODE(display_adc_value) {
 }
 
 static void (*adc_mode[MAX_MODE_NB])(uint16_t) = {
-  display_adc_value, display_adc_value, display_adc_value, display_adc_temp,
-  adc_nul
-};
+    display_adc_value, display_adc_value, display_adc_value, display_adc_temp,
+    adc_nul};
 
 /* ******************** LED_SCREEN_DISPLAY ******************** */
 
-#define DECL_LED_DISPLAY_MODE(name) \
-  static void name(void)
+#define DECL_LED_DISPLAY_MODE(name) static void name(void)
 
 static void (*led_screen_display_mode[MAX_MODE_NB])() = {
-  led_screen_display_nb, led_screen_display_nb, led_screen_display_nb,
-  led_screen_display_nb, led_screen_display_42
-};
+    led_screen_display_nb, led_screen_display_nb, led_screen_display_nb,
+    led_screen_display_nb, led_screen_display_42};
 
 /* ISR triggered every 4ms to display one of four led digits and shift the
  * index of the next digit to display */
@@ -661,10 +648,9 @@ volatile uint8_t cnt;
 /* triggered every seconds */
 ISR(TIMER1_COMPB_vect) {
   static const char led_rgb[3] = {LED_D5_R, LED_D5_G, LED_D5_B};
-  static uint8_t col_idx = 0,
-                 colors[COLORS_NB][3] = {{0xff, 0x00, 0x00},
-                                         {0x00, 0xff, 0x00},
-                                         {0x00, 0x00, 0xff}};
+  static uint8_t col_idx = 0, colors[COLORS_NB][3] = {{0xff, 0x00, 0x00},
+                                                      {0x00, 0xff, 0x00},
+                                                      {0x00, 0x00, 0xff}};
 
   CLEAR_LED(PORTD, (LED_D5_R | LED_D5_G | LED_D5_B));
   SET_LED(PORTD, led_rgb[col_idx]);
@@ -701,14 +687,16 @@ void start_routine() {
     if (BUTTON_PUSHED(PIND, SW1)) {
       I2C_LED_ON(LED_D9);
       _delay_ms(DEBOUNCE_DLY);
-      while (BUTTON_PUSHED(PIND, SW1) && cnt < 4);
+      while (BUTTON_PUSHED(PIND, SW1) && cnt < 4)
+        ;
       I2C_LED_OFF(LED_D9);
       _delay_ms(DEBOUNCE_DLY);
     }
     if (BUTTON_PUSHED(PIND, SW2)) {
       I2C_LED_ON(LED_D10);
       _delay_ms(DEBOUNCE_DLY);
-      while (BUTTON_PUSHED(PIND, SW2) && cnt < 4);
+      while (BUTTON_PUSHED(PIND, SW2) && cnt < 4)
+        ;
       I2C_LED_OFF(LED_D10);
       _delay_ms(DEBOUNCE_DLY);
     }
@@ -727,9 +715,8 @@ void start_routine() {
 }
 
 void loop() {
-  void (*mode_init[MAX_MODE_NB])() = {
-    rv1_init, ldr_init, ntc_init, temp_init, mode4_init
-  };
+  void (*mode_init[MAX_MODE_NB])() = {rv1_init, ldr_init, ntc_init, temp_init,
+                                      mode4_init};
 
   led_binary_display(mode_select);
   mode_init[mode_select]();

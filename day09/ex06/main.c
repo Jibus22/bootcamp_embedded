@@ -359,6 +359,7 @@ int main() {
   adc_set_channel(ADC_POT);
   init_timer();
 
-  while (1) {}
+  while (1) {
+  }
   return 0;
 }
