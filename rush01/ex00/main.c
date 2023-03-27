@@ -43,6 +43,64 @@ void uart_printstr(const char *str) {
   while (*str) uart_tx(*str++);
 }
 
+/* ******************** USER INPUT ******************** */
+
+#define BUFLEN 13
+#define DEL 127
+#define BELL 7
+#define ENTER 13
+
+int ft_isprint(unsigned char c) { return ((c >= 32 && c <= 126)); }
+
+void prompt(const char *prompt, char *buf, uint16_t prompt_size) {
+  int i = 0;
+  char c;
+
+  if (prompt) uart_printstr(prompt);
+
+  while (i < prompt_size) {
+    c = uart_rx();
+
+    if (i == prompt_size - 1) {
+      if (c != ENTER && c != DEL) {
+        uart_tx(BELL);
+        continue;
+      }
+    }
+
+    if (ft_isprint(c)) {
+      buf[i] = c;
+      uart_tx(c);
+      i++;
+    } else if (c == ENTER) {
+      uart_printstr("\n\r");
+      break;
+    } else if (c == DEL) {
+      if (i > 0) {
+        i--;
+        buf[i] = 0;
+        uart_printstr("\b \b");
+      } else
+        uart_tx(BELL);
+    } else
+      uart_tx(BELL);
+  }
+}
+
+int	ft_isdigit(int c) { return (c > 47 && c < 58); }
+
+uint16_t ft_atoi(const char *str) {
+  uint16_t nbr;
+  int i = 0;
+
+  nbr = 0;
+  while (ft_isdigit(str[i])) {
+    nbr = nbr * 10 + (str[i] - 48);
+    i++;
+  }
+  return nbr;
+}
+
 /* ******************** SPI ******************** */
 
 #define SPI_DDR DDRB
@@ -1104,6 +1162,29 @@ void start_routine() {
   }
 }
 
+void set_date() {
+  char buf[BUFLEN] = {0};
+  uint8_t inc;
+  uint16_t date_values[5], max_value[5] = {31, 12, 2099, 23, 59};
+  char usr_prompt[5][32] = {"Set day (dd): ", "Set month (mm): ",
+                            "Set year (yyyy): ", "Set hour (hh): ",
+                            "Set minutes (mm): "};
+
+  uart_printstr("Set date and time at this format: dd/mm/yyyy hh/mm\r\n");
+  for (uint8_t i = 0; i < 5; i++) {
+    inc = (((i > 0) * 2) * (((i == 3) * 1) + 1));
+    prompt(usr_prompt[i], buf + inc, 3);
+    if (!ft_isdigit(buf[inc]) || !ft_isdigit(buf[inc + 1]))
+      uart_printstr("Wrong input, exit prompt\r\n");
+      break;
+    date_values[i] = ft_atoi(buf + inc);
+    if (date_values[i] > max_value[i]) {
+      uart_printstr("Wrong input, exit prompt\r\n");
+      break;
+    }
+  }
+}
+
 int main() {
   cnt = dig = mode_select = loop_action = 0;
   led_nb = 8888;
@@ -1119,6 +1200,8 @@ int main() {
   aht20_sensor_power_on();
   i2c_expander_init_port0();
   i2c_expander_init_port1();
+
+  set_date();
 
   /* tc1 used to count every seconds */
   set_timer1(TC1_MODE4_A, TC1_MODE4_B, TC1_PRESCALER_1024, TC1_COMPA, 15624);
