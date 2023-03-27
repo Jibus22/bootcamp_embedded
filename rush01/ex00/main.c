@@ -340,7 +340,9 @@ void aht20_measure(uint8_t data[AHT20_DATA_ANSWER_LEN]) {
   i2c_write(AHT20_MEASURE_CMD_P1);
   i2c_write(AHT20_MEASURE_CMD_P2);
   i2c_stop();
+  sei();
   _delay_ms(80);
+  cli();
 
   /* read sensor answer */
   i2c_start();
@@ -349,7 +351,9 @@ void aht20_measure(uint8_t data[AHT20_DATA_ANSWER_LEN]) {
   /* wait until sensor says measurement is done */
   while ((data[0] & (1 << 7))) {
     uart_printstr("measurement not done, wait...\r\n");
+    sei();
     _delay_ms(10);
+    cli();
     data[0] = i2c_read(RD_ACK);
   }
 
@@ -379,6 +383,14 @@ uint8_t aht20_data_to_humidity(uint8_t data[AHT20_DATA_ANSWER_LEN]) {
   value = (value << 4) + (data[3] >> 4);
   result = (((double)value / ((long)1 << 20)) * 100.0);
   return (uint8_t)result;
+}
+
+/* execute cb safely from interrupts */
+void int_safe3(void (*cb)(uint8_t[AHT20_DATA_ANSWER_LEN]),
+               uint8_t data[AHT20_DATA_ANSWER_LEN]) {
+  cli();
+  cb(data);
+  sei();
 }
 
 /* ******************** PCA9555 EXPANDER  ******************** */
@@ -759,16 +771,16 @@ DECL_TC1_COMPB_MODE(mode_4) {
   iter_inc(col_idx, COLORS_NB - 1);
 }
 
-DECL_TC1_COMPB_MODE(celsius_temp) {
-  uint8_t data[AHT20_DATA_ANSWER_LEN] = {0};
-  static uint8_t i = 2, temp;
+volatile uint8_t loop_action;
 
+#define ACTION_SENSOR_MEASURE 0x06
+
+DECL_TC1_COMPB_MODE(sensor_measurement) {
+  static uint8_t i = 2;
   /* i runs between 0 and 2. aht20 measure must be done only every 2sec */
   iter_inc(i, 2);
-  if (i) return;
-  aht20_measure(data);
-  temp = aht20_data_to_temperature(data);
-  break_down(temp);
+  /* gives signal to action callback in main loop to take a measure or not */
+  loop_action = ((i == 0) * ACTION_SENSOR_MEASURE);
 }
 
 /* ******************** ISR ******************** */
@@ -787,7 +799,8 @@ ISR(TIMER2_COMPA_vect) {
 /* ISR used to call various flavors of callbacks */
 ISR(TIMER1_COMPB_vect) {
   static const void (*tc1_cmpB_mode[MAX_MODE_NB])() = {
-      tc1cmpB_nul, tc1cmpB_nul, tc1cmpB_nul, tc1cmpB_nul, mode_4, celsius_temp};
+      tc1cmpB_nul, tc1cmpB_nul, tc1cmpB_nul,
+      tc1cmpB_nul, mode_4,      sensor_measurement};
 
   tc1_cmpB_mode[mode_select]();
 }
@@ -817,6 +830,22 @@ ISR(ADC_vect) {
   TIFR0 = (1 << TOV0);
 }
 
+/* ******************** ACTION_MODE ******************** */
+
+#define DECL_ACTION_MODE(name) static void name()
+
+DECL_ACTION_MODE(action_nul) {}
+
+DECL_ACTION_MODE(sensor_take_temperature) {
+  static uint8_t data[AHT20_DATA_ANSWER_LEN];
+  static uint8_t temp;
+
+  if (loop_action != ACTION_SENSOR_MEASURE) return;
+  int_safe3(aht20_measure, data);
+  temp = aht20_data_to_temperature(data);
+  break_down(temp);
+}
+
 /* ******************** MAIN ******************** */
 
 void mode_init_decorator(void (*set_mode)(), uint8_t mode) {
@@ -832,11 +861,15 @@ void mode_init_decorator(void (*set_mode)(), uint8_t mode) {
 }
 
 void loop() {
+  static const void (*action[MAX_MODE_NB])() = {
+      action_nul, action_nul, action_nul,
+      action_nul, action_nul, sensor_take_temperature};
   static const void (*mode_set[MAX_MODE_NB])() = {
       rv1_init, ldr_init, ntc_init, temp_init, mode4_init, sensor_celsius_init};
 
   mode_init_decorator(mode_set[mode_select], mode_select);
   while (1) {
+    action[mode_select]();
     if (BUTTON_PUSHED(PIND, SW1)) {
       iter_inc(mode_select, MAX_MODE_NB - 1);
       mode_init_decorator(mode_set[mode_select], mode_select);
@@ -889,7 +922,7 @@ void start_routine() {
 }
 
 int main() {
-  cnt = dig = mode_select = 0;
+  cnt = dig = mode_select = loop_action = 0;
   led_nb = 8888;
 
   break_down(led_nb);
