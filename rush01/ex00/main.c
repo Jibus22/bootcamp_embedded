@@ -792,7 +792,7 @@ static void break_down(uint16_t n) {
 
 /* ******************** MODE_SELECTION ******************** */
 
-#define MAX_MODE_NB 10
+#define MAX_MODE_NB 11
 
 #define DECL_MODE_INIT(name) static void name()
 
@@ -914,6 +914,15 @@ DECL_TC1_COMPB_MODE(get_rtc_daymonth) {
   break_down((pcf8563_data_to_day(date) * 100) + (pcf8563_data_to_month(date)));
 }
 
+#define CURRENT_CENTURY 21
+
+DECL_TC1_COMPB_MODE(get_rtc_year) {
+  uint8_t date[PCF8563_FULL_DATE_LEN];
+
+  pcf8563_read_date(date, PCF8563_REG_SEC);
+  break_down(((CURRENT_CENTURY - 1) * 100) + pcf8563_data_to_year(date));
+}
+
 /* ******************** ISR ******************** */
 
 volatile uint8_t cnt;
@@ -922,7 +931,7 @@ static void (*led_screen_display_mode[MAX_MODE_NB])() = {
   led_screen_display_nb,   led_screen_display_nb, led_screen_display_nb,
   led_screen_display_nb,   led_screen_display_42, led_screen_display_cel,
   led_screen_display_fahr, led_screen_display_hum, led_screen_display_hourmin,
-  led_screen_display_daymonth};
+  led_screen_display_daymonth, led_screen_display_nb};
 
 /* ISR used to call various flavors of LED screen displaying callbacks */
 ISR(TIMER2_COMPA_vect) { led_screen_display_mode[mode_select](); }
@@ -930,7 +939,7 @@ ISR(TIMER2_COMPA_vect) { led_screen_display_mode[mode_select](); }
 static void (*tc1_cmpB_mode[MAX_MODE_NB])() = {
   tc1cmpB_nul, tc1cmpB_nul,        tc1cmpB_nul,        tc1cmpB_nul,
   mode_4,      sensor_measurement, sensor_measurement, sensor_measurement,
-  get_rtc_hm, get_rtc_daymonth};
+  get_rtc_hm, get_rtc_daymonth, get_rtc_year};
 
 /* ISR used to call various flavors of callbacks */
 ISR(TIMER1_COMPB_vect) { tc1_cmpB_mode[mode_select](); }
@@ -1027,6 +1036,7 @@ void loop() {
                                           sensor_get_fahrenheit,
                                           sensor_get_humidity,
                                           action_nul,
+                                          action_nul,
                                           action_nul};
   static void (*mode_set[MAX_MODE_NB])() = {rv1_init,
                                             ldr_init,
@@ -1036,6 +1046,7 @@ void loop() {
                                             sensor_measurement_init,
                                             sensor_measurement_init,
                                             sensor_measurement_init,
+                                            rtc_init,
                                             rtc_init,
                                             rtc_init};
 
