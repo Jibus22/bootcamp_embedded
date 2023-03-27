@@ -812,24 +812,20 @@ DECL_TC1_COMPB_MODE(sensor_measurement) {
 
 volatile uint8_t cnt;
 
-/* ISR used to call various flavors of LED screen displaying callbacks */
-ISR(TIMER2_COMPA_vect) {
-  static const void (*led_screen_display_mode[MAX_MODE_NB])() = {
-      led_screen_display_nb,   led_screen_display_nb, led_screen_display_nb,
-      led_screen_display_nb,   led_screen_display_42, led_screen_display_cel,
-      led_screen_display_fahr, led_screen_display_hum};
+static void (*led_screen_display_mode[MAX_MODE_NB])() = {
+  led_screen_display_nb,   led_screen_display_nb, led_screen_display_nb,
+  led_screen_display_nb,   led_screen_display_42, led_screen_display_cel,
+  led_screen_display_fahr, led_screen_display_hum};
 
-  led_screen_display_mode[mode_select]();
-}
+/* ISR used to call various flavors of LED screen displaying callbacks */
+ISR(TIMER2_COMPA_vect) { led_screen_display_mode[mode_select](); }
+
+static void (*tc1_cmpB_mode[MAX_MODE_NB])() = {
+  tc1cmpB_nul, tc1cmpB_nul,        tc1cmpB_nul,        tc1cmpB_nul,
+  mode_4,      sensor_measurement, sensor_measurement, sensor_measurement};
 
 /* ISR used to call various flavors of callbacks */
-ISR(TIMER1_COMPB_vect) {
-  static const void (*tc1_cmpB_mode[MAX_MODE_NB])() = {
-      tc1cmpB_nul, tc1cmpB_nul,        tc1cmpB_nul,        tc1cmpB_nul,
-      mode_4,      sensor_measurement, sensor_measurement, sensor_measurement};
-
-  tc1_cmpB_mode[mode_select]();
-}
+ISR(TIMER1_COMPB_vect) { tc1_cmpB_mode[mode_select](); }
 
 /* start routine */
 ISR(TIMER1_COMPA_vect) {
@@ -844,11 +840,12 @@ ISR(TIMER1_COMPA_vect) {
   }
 }
 
+static void (*adc_mode[MAX_MODE_NB])(uint16_t) = {
+  display_adc_value, display_adc_value, display_adc_value,
+  display_adc_temp,  adc_nul,           adc_nul};
+
 /* autotriggered by TC0 overflow. read and display adc value. */
 ISR(ADC_vect) {
-  static const void (*adc_mode[MAX_MODE_NB])(uint16_t) = {
-      display_adc_value, display_adc_value, display_adc_value,
-      display_adc_temp,  adc_nul,           adc_nul};
   uint16_t val = ADC;
 
   adc_mode[mode_select](val);
@@ -863,11 +860,11 @@ ISR(ADC_vect) {
 DECL_ACTION_MODE(action_nul) {}
 
 /* returns temperature in celsius, or humidity */
-uint8_t sensor_take_measure(uint8_t (*aht20_data_convert)(const uint8_t *)) {
+uint8_t sensor_take_measure(uint8_t (*aht20_data_convert_cb)(const uint8_t *)) {
   static uint8_t data[AHT20_DATA_ANSWER_LEN];
 
   int_safe3(aht20_measure, data);
-  return aht20_data_convert(data);
+  return aht20_data_convert_cb(data);
 }
 
 DECL_ACTION_MODE(sensor_get_celsius) {
@@ -895,27 +892,28 @@ void mode_init_decorator(void (*set_mode)(), uint8_t mode) {
   set_timer0(TC_CLEAR);
   set_timer1(TC_CLEAR);
   set_timer2(TC_CLEAR);
+  break_down(0);
 
   set_mode();
 }
 
 void loop() {
-  static const void (*action[MAX_MODE_NB])() = {action_nul,
-                                                action_nul,
-                                                action_nul,
-                                                action_nul,
-                                                action_nul,
-                                                sensor_get_celsius,
-                                                sensor_get_fahrenheit,
-                                                sensor_get_humidity};
-  static const void (*mode_set[MAX_MODE_NB])() = {rv1_init,
-                                                  ldr_init,
-                                                  ntc_init,
-                                                  temp_init,
-                                                  mode4_init,
-                                                  sensor_measurement_init,
-                                                  sensor_measurement_init,
-                                                  sensor_measurement_init};
+  static void (*action[MAX_MODE_NB])() = {action_nul,
+                                          action_nul,
+                                          action_nul,
+                                          action_nul,
+                                          action_nul,
+                                          sensor_get_celsius,
+                                          sensor_get_fahrenheit,
+                                          sensor_get_humidity};
+  static void (*mode_set[MAX_MODE_NB])() = {rv1_init,
+                                            ldr_init,
+                                            ntc_init,
+                                            temp_init,
+                                            mode4_init,
+                                            sensor_measurement_init,
+                                            sensor_measurement_init,
+                                            sensor_measurement_init};
 
   mode_init_decorator(mode_set[mode_select], mode_select);
   while (1) {
