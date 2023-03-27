@@ -598,6 +598,7 @@ static void set_timer2(uint8_t mode_a, uint8_t mode_b, uint8_t prescaler,
 #define SLR03_9 (SEG_E | SEG_DOT)
 #define SLR03_HYPHEN (SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_F | SEG_DOT)
 #define SLR03_C (SEG_B | SEG_C | SEG_G)
+#define SLR03_F (SEG_B | SEG_C | SEG_D)
 #define SLR03_VOID \
   (SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_F | SEG_G | SEG_DOT)
 
@@ -633,6 +634,18 @@ static void led_screen_display_cel() {
     SET_NB(numbers[nbrs[dig + 2]]);
   else
     SET_NB(celsius[dig - 2]);
+  SET_DIGIT(digit[dig]);
+  iter_inc(dig, 3);
+}
+
+static void led_screen_display_fahr() {
+  static const uint8_t fahr[2] = {SLR03_VOID, SLR03_F};
+
+  CLEAR_DIGIT(DIG_1 | DIG_2 | DIG_3 | DIG_4);
+  if (dig == 0 || dig == 1)
+    SET_NB(numbers[nbrs[dig + 2]]);
+  else
+    SET_NB(fahr[dig - 2]);
   SET_DIGIT(digit[dig]);
   iter_inc(dig, 3);
 }
@@ -684,7 +697,7 @@ static void led_binary_display(uint8_t nb) {
 
 /* ******************** MODE_SELECTION ******************** */
 
-#define MAX_MODE_NB 6
+#define MAX_MODE_NB 7
 
 #define DECL_MODE_INIT(name) static void name()
 
@@ -701,7 +714,7 @@ void adc_display_mode_init(void (*adc_channel_select)(uint8_t), uint8_t adc,
   set_timer2(TC2_MODE2_A, TC2_MODE2_B, TC2_PRESCALER_1024, TC2_COMPA, 70);
 }
 
-DECL_MODE_INIT(sensor_celsius_init) {
+DECL_MODE_INIT(sensor_measurement_init) {
   /* tc2 used to display led screen at compA match. mode 2 ctc */
   set_timer2(TC2_MODE2_A, TC2_MODE2_B, TC2_PRESCALER_1024, TC2_COMPA, 70);
   /* tc1 used to count every seconds */
@@ -790,8 +803,9 @@ volatile uint8_t cnt;
 /* ISR used to call various flavors of LED screen displaying callbacks */
 ISR(TIMER2_COMPA_vect) {
   static const void (*led_screen_display_mode[MAX_MODE_NB])() = {
-      led_screen_display_nb, led_screen_display_nb, led_screen_display_nb,
-      led_screen_display_nb, led_screen_display_42, led_screen_display_cel};
+      led_screen_display_nb,  led_screen_display_nb, led_screen_display_nb,
+      led_screen_display_nb,  led_screen_display_42, led_screen_display_cel,
+      led_screen_display_fahr};
 
   led_screen_display_mode[mode_select]();
 }
@@ -799,8 +813,8 @@ ISR(TIMER2_COMPA_vect) {
 /* ISR used to call various flavors of callbacks */
 ISR(TIMER1_COMPB_vect) {
   static const void (*tc1_cmpB_mode[MAX_MODE_NB])() = {
-      tc1cmpB_nul, tc1cmpB_nul, tc1cmpB_nul,
-      tc1cmpB_nul, mode_4,      sensor_measurement};
+      tc1cmpB_nul, tc1cmpB_nul,        tc1cmpB_nul,       tc1cmpB_nul,
+      mode_4,      sensor_measurement, sensor_measurement};
 
   tc1_cmpB_mode[mode_select]();
 }
@@ -836,14 +850,22 @@ ISR(ADC_vect) {
 
 DECL_ACTION_MODE(action_nul) {}
 
-DECL_ACTION_MODE(sensor_take_temperature) {
+/* returns temperature in celsius */
+uint8_t sensor_take_temperature() {
   static uint8_t data[AHT20_DATA_ANSWER_LEN];
-  static uint8_t temp;
 
-  if (loop_action != ACTION_SENSOR_MEASURE) return;
   int_safe3(aht20_measure, data);
-  temp = aht20_data_to_temperature(data);
-  break_down(temp);
+  return aht20_data_to_temperature(data);
+}
+
+DECL_ACTION_MODE(sensor_get_celsius) {
+  if (loop_action != ACTION_SENSOR_MEASURE) return;
+  break_down(sensor_take_temperature());
+}
+
+DECL_ACTION_MODE(sensor_get_fahrenheit) {
+  if (loop_action != ACTION_SENSOR_MEASURE) return;
+  break_down((sensor_take_temperature() * 9 / 5) + 32);
 }
 
 /* ******************** MAIN ******************** */
@@ -862,10 +884,15 @@ void mode_init_decorator(void (*set_mode)(), uint8_t mode) {
 
 void loop() {
   static const void (*action[MAX_MODE_NB])() = {
-      action_nul, action_nul, action_nul,
-      action_nul, action_nul, sensor_take_temperature};
-  static const void (*mode_set[MAX_MODE_NB])() = {
-      rv1_init, ldr_init, ntc_init, temp_init, mode4_init, sensor_celsius_init};
+      action_nul, action_nul,         action_nul,           action_nul,
+      action_nul, sensor_get_celsius, sensor_get_fahrenheit};
+  static const void (*mode_set[MAX_MODE_NB])() = {rv1_init,
+                                                  ldr_init,
+                                                  ntc_init,
+                                                  temp_init,
+                                                  mode4_init,
+                                                  sensor_measurement_init,
+                                                  sensor_measurement_init};
 
   mode_init_decorator(mode_set[mode_select], mode_select);
   while (1) {
