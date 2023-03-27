@@ -90,7 +90,7 @@ void apa102_led_frame(uint8_t brightness, uint8_t r, uint8_t g, uint8_t b) {
 #define COLORS_NB 3
 #define BRIGHT 1 /* brightness strength: 0 to 31 */
 
-void set_apa_led(uint8_t led, const uint8_t rgb[3]) {
+void set_apa102_led(uint8_t led, const uint8_t rgb[3]) {
   uint8_t led_type[3] = {1, 2, 4};
 
   led &= 0x07;
@@ -102,7 +102,7 @@ void set_apa_led(uint8_t led, const uint8_t rgb[3]) {
   apa102_end_frame();
 }
 
-#define CLEAR_APA_LED set_apa_led(0x00, (uint8_t[3]){0x00, 0x00, 0x00});
+#define CLEAR_APA102_LED set_apa102_led(0x00, (uint8_t[3]){0x00, 0x00, 0x00});
 
 /* ******************** TWI utils ******************** */
 
@@ -274,6 +274,111 @@ void i2c_start() {
   WAIT_I2C(TWCR); /* Wait confirmation TWI interface sent START */
   if (!ACK_TYPE(TW_START) && !ACK_TYPE(TW_REP_START))
     ERROR("start failed\n\r"); /* Check ACK of START or REP_START */
+}
+
+/* ******************** AHT20_SENSOR ******************** */
+
+#define AHT20_ADDR 0x38 /* address of sensor */
+
+#define AHT20_STATUS_CMD 0x71
+
+#define AHT20_INIT_CMD 0xBE
+#define AHT20_INIT_CMD_P1 0x08
+#define AHT20_INIT_CMD_P2 0x00
+
+#define AHT20_MEASURE_CMD 0xAC
+#define AHT20_MEASURE_CMD_P1 0x33
+#define AHT20_MEASURE_CMD_P2 0x00
+#define AHT20_DATA_ANSWER_LEN 7
+
+/* Ask for AHT20 status then read and return answer */
+unsigned char get_aht20_status() {
+  /* Ask for sensor status */
+  i2c_start();
+  i2c_transmit_addr(AHT20_ADDR, ADDR_W);
+  i2c_write(AHT20_STATUS_CMD);
+
+  /* Read sensor status */
+  i2c_start();
+  i2c_transmit_addr(AHT20_ADDR, ADDR_R);
+  return i2c_read(RD_NACK);
+}
+
+/* Send initialization command to aht20 */
+void aht20_sensor_init() {
+  i2c_start();
+  i2c_transmit_addr(AHT20_ADDR, ADDR_W);
+  i2c_write(AHT20_INIT_CMD);
+  i2c_write(AHT20_INIT_CMD_P1);
+  i2c_write(AHT20_INIT_CMD_P2);
+  _delay_ms(10);
+}
+
+void aht20_sensor_power_on() {
+  unsigned char status;
+
+  _delay_ms(40);
+  status = get_aht20_status();
+  /* if status say sensor isnt calibrated, send initialization command */
+  if (!(status & (1 << 3))) {
+    uart_printstr("Not calibrated, init sensor\r\n");
+    aht20_sensor_init();
+  }
+  i2c_stop();
+}
+
+void hex_print_aht20_measure(unsigned char *data) {
+  for (int i = 0; i < AHT20_DATA_ANSWER_LEN; i++) print_hex_value(data[i]);
+  uart_printstr("\n\r");
+}
+
+void aht20_measure(uint8_t data[AHT20_DATA_ANSWER_LEN]) {
+  /* trigger measurement */
+  i2c_start();
+  i2c_transmit_addr(AHT20_ADDR, ADDR_W);
+  i2c_write(AHT20_MEASURE_CMD);
+  i2c_write(AHT20_MEASURE_CMD_P1);
+  i2c_write(AHT20_MEASURE_CMD_P2);
+  i2c_stop();
+  _delay_ms(80);
+
+  /* read sensor answer */
+  i2c_start();
+  i2c_transmit_addr(AHT20_ADDR, ADDR_R);
+  data[0] = i2c_read(RD_ACK);
+  /* wait until sensor says measurement is done */
+  while ((data[0] & (1 << 7))) {
+    uart_printstr("measurement not done, wait...\r\n");
+    _delay_ms(10);
+    data[0] = i2c_read(RD_ACK);
+  }
+
+  /* read all following values returned by aht20 sensor */
+  for (int i = 1; i < AHT20_DATA_ANSWER_LEN; i++)
+    data[i] = i2c_read(i == (AHT20_DATA_ANSWER_LEN - 1));
+  i2c_stop();
+}
+
+uint8_t aht20_data_to_temperature(uint8_t data[AHT20_DATA_ANSWER_LEN]) {
+  long value;
+  double result;
+
+  value = (data[3] & 0x0F);
+  value = (value << 8) + (data[4]);
+  value = (value << 8) + (data[5]);
+  result = (((double)value / ((long)1 << 20)) * 200.0 - 50.0);
+  return (uint8_t)result;
+}
+
+uint8_t aht20_data_to_humidity(uint8_t data[AHT20_DATA_ANSWER_LEN]) {
+  long value;
+  double result;
+
+  value = data[1];
+  value = (value << 8) + (data[2]);
+  value = (value << 4) + (data[3] >> 4);
+  result = (((double)value / ((long)1 << 20)) * 100.0);
+  return (uint8_t)result;
 }
 
 /* ******************** PCA9555 EXPANDER  ******************** */
@@ -465,25 +570,31 @@ static void set_timer2(uint8_t mode_a, uint8_t mode_b, uint8_t prescaler,
 }
 
 /* ******************** DIGIT DISPLAY LOGIC ******************** */
-#define SET_DIGIT(dig) pca9555_safe_write_port0(dig, PCA9555_SET);
-#define CLEAR_DIGIT(dig) pca9555_safe_write_port0(dig, PCA9555_CLEAR);
-#define SET_NB(nb) pca9555_write(CMD_OUT_P1, PCA9555_SET_OUT(0xFF, nb));
+#define SET_DIGIT(dig) pca9555_safe_write_port0(dig, PCA9555_SET)
+#define CLEAR_DIGIT(dig) pca9555_safe_write_port0(dig, PCA9555_CLEAR)
+#define SET_NB(nb) pca9555_write(CMD_OUT_P1, PCA9555_SET_OUT(0xFF, nb))
+
+#define SLR03_0 (SEG_G | SEG_DOT)
+#define SLR03_1 (SEG_A | SEG_G | SEG_D | SEG_E | SEG_F | SEG_DOT)
+#define SLR03_2 (SEG_F | SEG_C | SEG_DOT)
+#define SLR03_3 (SEG_F | SEG_E | SEG_DOT)
+#define SLR03_4 (SEG_A | SEG_E | SEG_D | SEG_DOT)
+#define SLR03_5 (SEG_B | SEG_E | SEG_DOT)
+#define SLR03_6 (SEG_B | SEG_DOT)
+#define SLR03_7 (SEG_F | SEG_G | SEG_E | SEG_D | SEG_DOT)
+#define SLR03_8 (SEG_DOT)
+#define SLR03_9 (SEG_E | SEG_DOT)
+#define SLR03_HYPHEN (SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_F | SEG_DOT)
+#define SLR03_C (SEG_B | SEG_C | SEG_G)
+#define SLR03_VOID \
+  (SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_F | SEG_G | SEG_DOT)
 
 volatile uint16_t led_nb;
 volatile uint8_t nbrs[4], dig;
 static const uint8_t digit[4] = {DIG_1, DIG_2, DIG_3, DIG_4},
-                     numbers[10] = {
-                         SEG_G | SEG_DOT,
-                         SEG_A | SEG_G | SEG_D | SEG_E | SEG_F | SEG_DOT,
-                         SEG_F | SEG_C | SEG_DOT,
-                         SEG_F | SEG_E | SEG_DOT,
-                         SEG_A | SEG_E | SEG_D | SEG_DOT,
-                         SEG_B | SEG_E | SEG_DOT,
-                         SEG_B | SEG_DOT,
-                         SEG_F | SEG_G | SEG_E | SEG_D | SEG_DOT,
-                         SEG_DOT,
-                         SEG_E | SEG_DOT,
-};
+                     numbers[10] = {SLR03_0, SLR03_1, SLR03_2, SLR03_3,
+                                    SLR03_4, SLR03_5, SLR03_6, SLR03_7,
+                                    SLR03_8, SLR03_9};
 
 static void led_screen_display_nb() {
   CLEAR_DIGIT(DIG_1 | DIG_2 | DIG_3 | DIG_4);
@@ -493,12 +604,8 @@ static void led_screen_display_nb() {
 }
 
 static void led_screen_display_42() {
-  static const uint8_t displayft[4] = {
-      SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_F | SEG_DOT,
-      SEG_A | SEG_E | SEG_D | SEG_DOT,
-      SEG_F | SEG_C | SEG_DOT,
-      SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_F | SEG_DOT,
-  };
+  static const uint8_t displayft[4] = {SLR03_HYPHEN, SLR03_4, SLR03_2,
+                                       SLR03_HYPHEN};
 
   CLEAR_DIGIT(DIG_1 | DIG_2 | DIG_3 | DIG_4);
   SET_NB(displayft[dig]);
@@ -506,7 +613,19 @@ static void led_screen_display_42() {
   iter_inc(dig, 3);
 }
 
-/* Break down nb in four digits. Store each digit in nbrs variable */
+static void led_screen_display_cel() {
+  static const uint8_t celsius[2] = {SLR03_VOID, SLR03_C};
+
+  CLEAR_DIGIT(DIG_1 | DIG_2 | DIG_3 | DIG_4);
+  if (dig == 0 || dig == 1)
+    SET_NB(numbers[nbrs[dig + 2]]);
+  else
+    SET_NB(celsius[dig - 2]);
+  SET_DIGIT(digit[dig]);
+  iter_inc(dig, 3);
+}
+
+/* Break down nb in four digits. Store each digit in 'nbrs' global variable */
 static void break_down(uint16_t n) {
   uint8_t result[4] = {0, 0, 0, 0};
   unsigned int e = n / 10;
@@ -553,7 +672,7 @@ static void led_binary_display(uint8_t nb) {
 
 /* ******************** MODE_SELECTION ******************** */
 
-#define MAX_MODE_NB 5
+#define MAX_MODE_NB 6
 
 #define DECL_MODE_INIT(name) static void name()
 
@@ -568,6 +687,13 @@ void adc_display_mode_init(void (*adc_channel_select)(uint8_t), uint8_t adc,
   set_timer0(0x00, 0x00, TC0_PRESCALER_1024, 0x00, 0x00);
   /* tc2 used to display led screen at compA match. mode 2 ctc */
   set_timer2(TC2_MODE2_A, TC2_MODE2_B, TC2_PRESCALER_1024, TC2_COMPA, 70);
+}
+
+DECL_MODE_INIT(sensor_celsius_init) {
+  /* tc2 used to display led screen at compA match. mode 2 ctc */
+  set_timer2(TC2_MODE2_A, TC2_MODE2_B, TC2_PRESCALER_1024, TC2_COMPA, 70);
+  /* tc1 used to count every seconds */
+  set_timer1(TC1_MODE4_A, TC1_MODE4_B, TC1_PRESCALER_1024, TC1_COMPB, 15624);
 }
 
 DECL_MODE_INIT(mode4_init) {
@@ -614,22 +740,13 @@ DECL_ADC_MODE(display_adc_value) {
   }
 }
 
-/* ******************** ISR ******************** */
+/* ******************** TC1_COMPB MODES ******************** */
 
-volatile uint8_t cnt;
+#define DECL_TC1_COMPB_MODE(name) static void name()
 
-/* ISR used to display one of four led digits and shift the index of the
- * next digit to display */
-ISR(TIMER2_COMPA_vect) {
-  static const void (*led_screen_display_mode[MAX_MODE_NB])() = {
-      led_screen_display_nb, led_screen_display_nb, led_screen_display_nb,
-      led_screen_display_nb, led_screen_display_42};
+DECL_TC1_COMPB_MODE(tc1cmpB_nul) {}
 
-  led_screen_display_mode[mode_select]();
-}
-
-/* display led, switch colors, mode 4 */
-ISR(TIMER1_COMPB_vect) {
+DECL_TC1_COMPB_MODE(mode_4) {
   static uint8_t col_idx = 0;
   static const uint8_t led_rgb[3] = {LED_D5_R, LED_D5_G, LED_D5_B},
                        colors[COLORS_NB][3] = {{0xff, 0x00, 0x00},
@@ -638,8 +755,41 @@ ISR(TIMER1_COMPB_vect) {
 
   CLEAR_LED(PORTD, (LED_D5_R | LED_D5_G | LED_D5_B));
   SET_LED(PORTD, led_rgb[col_idx]);
-  set_apa_led(0x7, colors[col_idx]);
+  set_apa102_led(0x7, colors[col_idx]);
   iter_inc(col_idx, COLORS_NB - 1);
+}
+
+DECL_TC1_COMPB_MODE(celsius_temp) {
+  uint8_t data[AHT20_DATA_ANSWER_LEN] = {0};
+  static uint8_t i = 2, temp;
+
+  /* i runs between 0 and 2. aht20 measure must be done only every 2sec */
+  iter_inc(i, 2);
+  if (i) return;
+  aht20_measure(data);
+  temp = aht20_data_to_temperature(data);
+  break_down(temp);
+}
+
+/* ******************** ISR ******************** */
+
+volatile uint8_t cnt;
+
+/* ISR used to call various flavors of LED screen displaying callbacks */
+ISR(TIMER2_COMPA_vect) {
+  static const void (*led_screen_display_mode[MAX_MODE_NB])() = {
+      led_screen_display_nb, led_screen_display_nb, led_screen_display_nb,
+      led_screen_display_nb, led_screen_display_42, led_screen_display_cel};
+
+  led_screen_display_mode[mode_select]();
+}
+
+/* ISR used to call various flavors of callbacks */
+ISR(TIMER1_COMPB_vect) {
+  static const void (*tc1_cmpB_mode[MAX_MODE_NB])() = {
+      tc1cmpB_nul, tc1cmpB_nul, tc1cmpB_nul, tc1cmpB_nul, mode_4, celsius_temp};
+
+  tc1_cmpB_mode[mode_select]();
 }
 
 /* start routine */
@@ -658,8 +808,8 @@ ISR(TIMER1_COMPA_vect) {
 /* autotriggered by TC0 overflow. read and display adc value. */
 ISR(ADC_vect) {
   static const void (*adc_mode[MAX_MODE_NB])(uint16_t) = {
-      display_adc_value, display_adc_value, display_adc_value, display_adc_temp,
-      adc_nul};
+      display_adc_value, display_adc_value, display_adc_value,
+      display_adc_temp,  adc_nul,           adc_nul};
   uint16_t val = ADC;
 
   adc_mode[mode_select](val);
@@ -669,21 +819,21 @@ ISR(ADC_vect) {
 
 /* ******************** MAIN ******************** */
 
-void mode_init_decorator(void (*cb)(), uint8_t mode) {
+void mode_init_decorator(void (*set_mode)(), uint8_t mode) {
   led_binary_display(mode);
 
-  CLEAR_APA_LED;
+  CLEAR_APA102_LED;
   CLEAR_LED(PORTD, (LED_D5_R | LED_D5_G | LED_D5_B));
   set_timer0(TC_CLEAR);
   set_timer1(TC_CLEAR);
   set_timer2(TC_CLEAR);
 
-  cb();
+  set_mode();
 }
 
 void loop() {
-  static const void (*mode_set[MAX_MODE_NB])() = {rv1_init, ldr_init, ntc_init,
-                                                  temp_init, mode4_init};
+  static const void (*mode_set[MAX_MODE_NB])() = {
+      rv1_init, ldr_init, ntc_init, temp_init, mode4_init, sensor_celsius_init};
 
   mode_init_decorator(mode_set[mode_select], mode_select);
   while (1) {
@@ -752,6 +902,7 @@ int main() {
   SPI_MasterInit();
 
   i2c_init();
+  aht20_sensor_power_on();
   i2c_expander_init_port0();
   i2c_expander_init_port1();
 
