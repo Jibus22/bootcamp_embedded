@@ -46,16 +46,21 @@ void uart_printstr(const char *str) {
 /* ******************** SPI ******************** */
 
 #define SPI_DDR DDRB
-#define SS PINB2
-#define MOSI PINB3
-#define SCK PINB5
+#define SS (1 << PINB2)
+#define MOSI (1 << PINB3)
+#define MISO (1 << PINB4)
+#define SCK (1 << PINB5)
 
 void SPI_MasterInit(void) {
   /* Set MOSI, Slave Select and SCK output, all others input */
-  SPI_DDR |= (1 << MOSI) | (1 << SCK) | (1 << SS);
+  SPI_DDR |= MOSI | SCK | SS;
+  /* MISO must be an input pin */
+  SPI_DDR &= ~MISO;
   /* Enable SPI, Master, set clock rate fck/16 */
   SPCR = (1 << SPE) | (1 << MSTR) | (1 << SPR0);
 }
+
+void SPI_MasterClear(void) { SPCR &= ~(1 << SPE); }
 
 uint8_t SPI_MasterTransmit(uint8_t cData) {
   /* Start transmission */
@@ -276,7 +281,7 @@ void i2c_start() {
     ERROR("start failed\n\r"); /* Check ACK of START or REP_START */
 }
 
-/* ******************** AHT20_SENSOR ******************** */
+/* ******************** AHT20 I2C SENSOR ******************** */
 
 #define AHT20_ADDR 0x38 /* address of sensor */
 
@@ -392,7 +397,7 @@ void int_safe3(void (*cb)(uint8_t *), uint8_t *data) {
   sei();
 }
 
-/* ******************** PCA9555 EXPANDER  ******************** */
+/* ******************** PCA9555 I2C EXPANDER  ******************** */
 
 /* PCA9555 address, as configured on the dev dipswitchs (0,0,0) */
 #define PCA9555_ADDR 0x20
@@ -461,6 +466,62 @@ void int_safe2(void (*cb)(uint8_t, uint8_t), uint8_t data, uint8_t action) {
   sei();
 }
 
+/* ******************** PCF8563 I2C RTC ******************** */
+
+/* PCF8563 address */
+#define PCF8563_ADDR 0x51
+
+/* PCF8563 registers addresses */
+#define PCF8563_REG_CTRL1 0x00
+#define PCF8563_REG_CTRL2 0x01
+#define PCF8563_REG_SEC 0x02
+#define PCF8563_REG_MIN 0x03
+#define PCF8563_REG_HOURS 0x04
+#define PCF8563_REG_DAYS 0x05
+#define PCF8563_REG_WEEKDAYS 0x06
+#define PCF8563_REG_CENTURY_MONTHS 0x07
+#define PCF8563_REG_YEARS 0x08
+
+#define PCF8563_FULL_DATE_LEN 0x07
+
+/* fill buf with full date. buf must be of size PCF8563_FULL_DATE_LEN */
+void pcf8563_read_date(uint8_t *buf, uint8_t reg) {
+  i2c_start();
+  i2c_transmit_addr(PCF8563_ADDR, ADDR_W);
+  i2c_write(reg);
+  i2c_start();
+  i2c_transmit_addr(PCF8563_ADDR, ADDR_R);
+
+  for (uint8_t i = 0; i < PCF8563_FULL_DATE_LEN; i++)
+    buf[i] = i2c_read(i == (PCF8563_FULL_DATE_LEN - 1));
+
+  i2c_stop();
+}
+
+uint8_t pcf8563_data_to_min(const uint8_t *data) {
+  return (((data[1] & 0x70) >> 4) * 10) + (data[1] & 0xF);
+}
+
+uint8_t pcf8563_data_to_hour(const uint8_t *data) {
+  return (((data[2] & 0x30) >> 4) * 10) + (data[2] & 0xF);
+}
+
+uint8_t pcf8563_data_to_day(const uint8_t *data) {
+  return (((data[3] & 0x30) >> 4) * 10) + (data[3] & 0xF);
+}
+
+uint8_t pcf8563_data_to_weekday(const uint8_t *data) {
+  return data[4] & 0x07;
+}
+
+uint8_t pcf8563_data_to_month(const uint8_t *data) {
+  return (((data[5] & 0x10) >> 4) * 10) + (data[5] & 0xF);
+}
+
+uint8_t pcf8563_data_to_year(const uint8_t *data) {
+  return (((data[6] & 0xF0) >> 4) * 10) + (data[6] & 0xF);
+}
+
 /* ******************** SWITCH ******************** */
 #define DEBOUNCE_DLY 5 /* delay anti bounce */
 #define BUTTON_PUSHED(port, pin) (!(port & (pin)))
@@ -482,6 +543,37 @@ void switch_init() { DDRD &= ~(SW1 | SW2); }
   do {                                        \
     port = int_safe(pca9555_read, CMD_IN_P0); \
   } while (BUTTON_PUSHED(port, pin))
+
+/* ******************** LED ******************** */
+
+#define SET_LED(port, led) port |= (led)
+#define CLEAR_LED(port, led) port &= ~(led)
+
+#define LED_D5_R (1 << PD5)
+#define LED_D5_G (1 << PD6)
+#define LED_D5_B (1 << PD3)
+
+static void led_rgb_init() {
+  DDRD |= LED_D5_R | LED_D5_G | LED_D5_B;
+  CLEAR_LED(PORTD, (LED_D5_R | LED_D5_G | LED_D5_B));
+}
+
+#define LED_D1 (1 << PINB0)
+#define LED_D2 (1 << PINB1)
+#define LED_D3 (1 << PINB2)
+#define LED_D4 (1 << PINB4)
+
+static void led_init() {
+  DDRB = LED_D1 | LED_D2 | LED_D3 | LED_D4;
+  CLEAR_LED(PORTB, (LED_D1 | LED_D2 | LED_D3 | LED_D4));
+}
+
+/* Display nb in binary with leds */
+static void led_binary_display(uint8_t nb) {
+  CLEAR_LED(PORTB, (LED_D1 | LED_D2 | LED_D3 | LED_D4));
+  PORTB |= (LED_D1 * ((nb & (1 << 0)) > 0)) | (LED_D2 * ((nb & (1 << 1)) > 0)) |
+           (LED_D3 * ((nb & (1 << 2)) > 0)) | (LED_D4 * ((nb & (1 << 3)) > 0));
+}
 
 /* ******************** I2C_LED ******************** */
 /* PCA9555 IO routing */
@@ -662,6 +754,17 @@ static void led_screen_display_hum() {
   circular_inc(dig, 3);
 }
 
+static void led_screen_display_hourmin() {
+  uint8_t current_dig = numbers[nbrs[dig]];
+
+  CLEAR_DIGIT(DIG_1 | DIG_2 | DIG_3 | DIG_4);
+  if (dig == 1 || dig == 3)
+    current_dig &= ~SEG_DOT;
+  SET_NB(current_dig);
+  SET_DIGIT(digit[dig]);
+  circular_inc(dig, 3);
+}
+
 /* Break down nb in four digits. Store each digit in 'nbrs' global variable */
 static void break_down(uint16_t n) {
   uint8_t result[4] = {0, 0, 0, 0};
@@ -676,40 +779,9 @@ static void break_down(uint16_t n) {
   for (uint8_t k = 0; k < 4; k++) nbrs[k] = result[k];
 }
 
-/* ******************** LED ******************** */
-
-#define SET_LED(port, led) port |= (led)
-#define CLEAR_LED(port, led) port &= ~(led)
-
-#define LED_D5_R (1 << PD5)
-#define LED_D5_G (1 << PD6)
-#define LED_D5_B (1 << PD3)
-
-static void led_rgb_init() {
-  DDRD |= LED_D5_R | LED_D5_G | LED_D5_B;
-  CLEAR_LED(PORTD, (LED_D5_R | LED_D5_G | LED_D5_B));
-}
-
-#define LED_D1 (1 << 0)
-#define LED_D2 (1 << 1)
-#define LED_D3 (1 << 2)
-#define LED_D4 (1 << 4)
-
-static void led_init() {
-  DDRB = LED_D1 | LED_D2 | LED_D3 | LED_D4;
-  PORTB &= ~(LED_D1 | LED_D2 | LED_D3 | LED_D4);
-}
-
-/* Display nb in binary with leds */
-static void led_binary_display(uint8_t nb) {
-  PORTB &= ~(LED_D1 | LED_D2 | LED_D3 | LED_D4);
-  PORTB |= (LED_D1 * ((nb & (1 << 0)) > 0)) | (LED_D2 * ((nb & (1 << 1)) > 0)) |
-           (LED_D3 * ((nb & (1 << 2)) > 0)) | (LED_D4 * ((nb & (1 << 3)) > 0));
-}
-
 /* ******************** MODE_SELECTION ******************** */
 
-#define MAX_MODE_NB 8
+#define MAX_MODE_NB 9
 
 #define DECL_MODE_INIT(name) static void name()
 
@@ -726,6 +798,13 @@ void adc_display_mode_init(void (*adc_channel_select)(uint8_t), uint8_t adc,
   set_timer2(TC2_MODE2_A, TC2_MODE2_B, TC2_PRESCALER_1024, TC2_COMPA, 70);
 }
 
+DECL_MODE_INIT(rtc_init) {
+  /* tc2 used to display led screen at compA match. mode 2 ctc */
+  set_timer2(TC2_MODE2_A, TC2_MODE2_B, TC2_PRESCALER_1024, TC2_COMPA, 70);
+  /* tc1 used to count every seconds */
+  set_timer1(TC1_MODE4_A, TC1_MODE4_B, TC1_PRESCALER_1024, TC1_COMPB, 15624);
+}
+
 DECL_MODE_INIT(sensor_measurement_init) {
   /* tc2 used to display led screen at compA match. mode 2 ctc */
   set_timer2(TC2_MODE2_A, TC2_MODE2_B, TC2_PRESCALER_1024, TC2_COMPA, 70);
@@ -734,6 +813,8 @@ DECL_MODE_INIT(sensor_measurement_init) {
 }
 
 DECL_MODE_INIT(mode4_init) {
+  SPI_MasterInit();
+  led_rgb_init();
   /* tc2 used to display led screen at compA match. mode 2 ctc */
   set_timer2(TC2_MODE2_A, TC2_MODE2_B, TC2_PRESCALER_1024, TC2_COMPA, 70);
   /* tc1 used to count every seconds */
@@ -808,6 +889,13 @@ DECL_TC1_COMPB_MODE(sensor_measurement) {
   loop_action = ((i == 0) * ACTION_SENSOR_MEASURE);
 }
 
+DECL_TC1_COMPB_MODE(get_rtc_hm) {
+  uint8_t date[PCF8563_FULL_DATE_LEN];
+
+  pcf8563_read_date(date, PCF8563_REG_SEC);
+  break_down((pcf8563_data_to_hour(date) * 100) + (pcf8563_data_to_min(date)));
+}
+
 /* ******************** ISR ******************** */
 
 volatile uint8_t cnt;
@@ -815,14 +903,15 @@ volatile uint8_t cnt;
 static void (*led_screen_display_mode[MAX_MODE_NB])() = {
   led_screen_display_nb,   led_screen_display_nb, led_screen_display_nb,
   led_screen_display_nb,   led_screen_display_42, led_screen_display_cel,
-  led_screen_display_fahr, led_screen_display_hum};
+  led_screen_display_fahr, led_screen_display_hum, led_screen_display_hourmin};
 
 /* ISR used to call various flavors of LED screen displaying callbacks */
 ISR(TIMER2_COMPA_vect) { led_screen_display_mode[mode_select](); }
 
 static void (*tc1_cmpB_mode[MAX_MODE_NB])() = {
   tc1cmpB_nul, tc1cmpB_nul,        tc1cmpB_nul,        tc1cmpB_nul,
-  mode_4,      sensor_measurement, sensor_measurement, sensor_measurement};
+  mode_4,      sensor_measurement, sensor_measurement, sensor_measurement,
+  get_rtc_hm};
 
 /* ISR used to call various flavors of callbacks */
 ISR(TIMER1_COMPB_vect) { tc1_cmpB_mode[mode_select](); }
@@ -885,16 +974,28 @@ DECL_ACTION_MODE(sensor_get_humidity) {
 /* ******************** MAIN ******************** */
 
 void mode_init_decorator(void (*set_mode)(), uint8_t mode) {
-  led_binary_display(mode);
+  static uint8_t last_mode;
+  cli();
 
-  CLEAR_APA102_LED;
-  CLEAR_LED(PORTD, (LED_D5_R | LED_D5_G | LED_D5_B));
+  if (last_mode == 4) {
+    CLEAR_APA102_LED;
+    CLEAR_LED(PORTD, (LED_D5_R | LED_D5_G | LED_D5_B));
+    SPI_MasterClear();
+    DDRB |= LED_D4;
+  }
+
   set_timer0(TC_CLEAR);
   set_timer1(TC_CLEAR);
   set_timer2(TC_CLEAR);
+
+  led_binary_display(mode);
+
   break_down(0);
 
+  sei();
+
   set_mode();
+  last_mode = mode;
 }
 
 void loop() {
@@ -905,7 +1006,8 @@ void loop() {
                                           action_nul,
                                           sensor_get_celsius,
                                           sensor_get_fahrenheit,
-                                          sensor_get_humidity};
+                                          sensor_get_humidity,
+                                          action_nul};
   static void (*mode_set[MAX_MODE_NB])() = {rv1_init,
                                             ldr_init,
                                             ntc_init,
@@ -913,7 +1015,8 @@ void loop() {
                                             mode4_init,
                                             sensor_measurement_init,
                                             sensor_measurement_init,
-                                            sensor_measurement_init};
+                                            sensor_measurement_init,
+                                            rtc_init};
 
   mode_init_decorator(mode_set[mode_select], mode_select);
   while (1) {
@@ -977,10 +1080,8 @@ int main() {
 
   switch_init();
   led_init();
-  led_rgb_init();
 
   uart_init();
-  SPI_MasterInit();
 
   i2c_init();
   aht20_sensor_power_on();
