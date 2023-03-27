@@ -7,8 +7,8 @@
 #define F_CPU 16000000UL
 #endif
 
-#define iter_inc(i, max) i = ((i != (max)) * (i + 1))
-#define iter_dec(i, max) i = (((i > 0) * (i - 1)) + ((i == 0) * (max)))
+#define circular_inc(i, max) i = ((i != (max)) * (i + 1))
+#define circular_dec(i, max) i = (((i > 0) * (i - 1)) + ((i == 0) * (max)))
 
 /* ******************** UART ******************** */
 
@@ -363,7 +363,7 @@ void aht20_measure(uint8_t data[AHT20_DATA_ANSWER_LEN]) {
   i2c_stop();
 }
 
-uint8_t aht20_data_to_temperature(uint8_t data[AHT20_DATA_ANSWER_LEN]) {
+uint8_t aht20_data_to_temperature(const uint8_t *data) {
   long value;
   double result;
 
@@ -374,7 +374,7 @@ uint8_t aht20_data_to_temperature(uint8_t data[AHT20_DATA_ANSWER_LEN]) {
   return (uint8_t)result;
 }
 
-uint8_t aht20_data_to_humidity(uint8_t data[AHT20_DATA_ANSWER_LEN]) {
+uint8_t aht20_data_to_humidity(const uint8_t *data) {
   long value;
   double result;
 
@@ -386,8 +386,7 @@ uint8_t aht20_data_to_humidity(uint8_t data[AHT20_DATA_ANSWER_LEN]) {
 }
 
 /* execute cb safely from interrupts */
-void int_safe3(void (*cb)(uint8_t[AHT20_DATA_ANSWER_LEN]),
-               uint8_t data[AHT20_DATA_ANSWER_LEN]) {
+void int_safe3(void (*cb)(uint8_t *), uint8_t *data) {
   cli();
   cb(data);
   sei();
@@ -599,6 +598,7 @@ static void set_timer2(uint8_t mode_a, uint8_t mode_b, uint8_t prescaler,
 #define SLR03_HYPHEN (SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_F | SEG_DOT)
 #define SLR03_C (SEG_B | SEG_C | SEG_G)
 #define SLR03_F (SEG_B | SEG_C | SEG_D)
+#define SLR03_H (SEG_A | SEG_D)
 #define SLR03_VOID \
   (SEG_A | SEG_B | SEG_C | SEG_D | SEG_E | SEG_F | SEG_G | SEG_DOT)
 
@@ -613,7 +613,7 @@ static void led_screen_display_nb() {
   CLEAR_DIGIT(DIG_1 | DIG_2 | DIG_3 | DIG_4);
   SET_NB(numbers[nbrs[dig]]);
   SET_DIGIT(digit[dig]);
-  iter_inc(dig, 3);
+  circular_inc(dig, 3);
 }
 
 static void led_screen_display_42() {
@@ -623,7 +623,7 @@ static void led_screen_display_42() {
   CLEAR_DIGIT(DIG_1 | DIG_2 | DIG_3 | DIG_4);
   SET_NB(displayft[dig]);
   SET_DIGIT(digit[dig]);
-  iter_inc(dig, 3);
+  circular_inc(dig, 3);
 }
 
 static void led_screen_display_cel() {
@@ -635,7 +635,7 @@ static void led_screen_display_cel() {
   else
     SET_NB(celsius[dig - 2]);
   SET_DIGIT(digit[dig]);
-  iter_inc(dig, 3);
+  circular_inc(dig, 3);
 }
 
 static void led_screen_display_fahr() {
@@ -647,7 +647,19 @@ static void led_screen_display_fahr() {
   else
     SET_NB(fahr[dig - 2]);
   SET_DIGIT(digit[dig]);
-  iter_inc(dig, 3);
+  circular_inc(dig, 3);
+}
+
+static void led_screen_display_hum() {
+  static const uint8_t hum[2] = {SLR03_VOID, SLR03_H};
+
+  CLEAR_DIGIT(DIG_1 | DIG_2 | DIG_3 | DIG_4);
+  if (dig == 0 || dig == 1)
+    SET_NB(numbers[nbrs[dig + 2]]);
+  else
+    SET_NB(hum[dig - 2]);
+  SET_DIGIT(digit[dig]);
+  circular_inc(dig, 3);
 }
 
 /* Break down nb in four digits. Store each digit in 'nbrs' global variable */
@@ -697,7 +709,7 @@ static void led_binary_display(uint8_t nb) {
 
 /* ******************** MODE_SELECTION ******************** */
 
-#define MAX_MODE_NB 7
+#define MAX_MODE_NB 8
 
 #define DECL_MODE_INIT(name) static void name()
 
@@ -781,7 +793,7 @@ DECL_TC1_COMPB_MODE(mode_4) {
   CLEAR_LED(PORTD, (LED_D5_R | LED_D5_G | LED_D5_B));
   SET_LED(PORTD, led_rgb[col_idx]);
   set_apa102_led(0x7, colors[col_idx]);
-  iter_inc(col_idx, COLORS_NB - 1);
+  circular_inc(col_idx, COLORS_NB - 1);
 }
 
 volatile uint8_t loop_action;
@@ -791,7 +803,7 @@ volatile uint8_t loop_action;
 DECL_TC1_COMPB_MODE(sensor_measurement) {
   static uint8_t i = 2;
   /* i runs between 0 and 2. aht20 measure must be done only every 2sec */
-  iter_inc(i, 2);
+  circular_inc(i, 2);
   /* gives signal to action callback in main loop to take a measure or not */
   loop_action = ((i == 0) * ACTION_SENSOR_MEASURE);
 }
@@ -803,9 +815,9 @@ volatile uint8_t cnt;
 /* ISR used to call various flavors of LED screen displaying callbacks */
 ISR(TIMER2_COMPA_vect) {
   static const void (*led_screen_display_mode[MAX_MODE_NB])() = {
-      led_screen_display_nb,  led_screen_display_nb, led_screen_display_nb,
-      led_screen_display_nb,  led_screen_display_42, led_screen_display_cel,
-      led_screen_display_fahr};
+      led_screen_display_nb,   led_screen_display_nb, led_screen_display_nb,
+      led_screen_display_nb,   led_screen_display_42, led_screen_display_cel,
+      led_screen_display_fahr, led_screen_display_hum};
 
   led_screen_display_mode[mode_select]();
 }
@@ -813,8 +825,8 @@ ISR(TIMER2_COMPA_vect) {
 /* ISR used to call various flavors of callbacks */
 ISR(TIMER1_COMPB_vect) {
   static const void (*tc1_cmpB_mode[MAX_MODE_NB])() = {
-      tc1cmpB_nul, tc1cmpB_nul,        tc1cmpB_nul,       tc1cmpB_nul,
-      mode_4,      sensor_measurement, sensor_measurement};
+      tc1cmpB_nul, tc1cmpB_nul,        tc1cmpB_nul,        tc1cmpB_nul,
+      mode_4,      sensor_measurement, sensor_measurement, sensor_measurement};
 
   tc1_cmpB_mode[mode_select]();
 }
@@ -850,22 +862,27 @@ ISR(ADC_vect) {
 
 DECL_ACTION_MODE(action_nul) {}
 
-/* returns temperature in celsius */
-uint8_t sensor_take_temperature() {
+/* returns temperature in celsius, or humidity */
+uint8_t sensor_take_measure(uint8_t (*aht20_data_convert)(const uint8_t *)) {
   static uint8_t data[AHT20_DATA_ANSWER_LEN];
 
   int_safe3(aht20_measure, data);
-  return aht20_data_to_temperature(data);
+  return aht20_data_convert(data);
 }
 
 DECL_ACTION_MODE(sensor_get_celsius) {
   if (loop_action != ACTION_SENSOR_MEASURE) return;
-  break_down(sensor_take_temperature());
+  break_down(sensor_take_measure(aht20_data_to_temperature));
 }
 
 DECL_ACTION_MODE(sensor_get_fahrenheit) {
   if (loop_action != ACTION_SENSOR_MEASURE) return;
-  break_down((sensor_take_temperature() * 9 / 5) + 32);
+  break_down((sensor_take_measure(aht20_data_to_temperature) * 9 / 5) + 32);
+}
+
+DECL_ACTION_MODE(sensor_get_humidity) {
+  if (loop_action != ACTION_SENSOR_MEASURE) return;
+  break_down(sensor_take_measure(aht20_data_to_humidity));
 }
 
 /* ******************** MAIN ******************** */
@@ -883,14 +900,20 @@ void mode_init_decorator(void (*set_mode)(), uint8_t mode) {
 }
 
 void loop() {
-  static const void (*action[MAX_MODE_NB])() = {
-      action_nul, action_nul,         action_nul,           action_nul,
-      action_nul, sensor_get_celsius, sensor_get_fahrenheit};
+  static const void (*action[MAX_MODE_NB])() = {action_nul,
+                                                action_nul,
+                                                action_nul,
+                                                action_nul,
+                                                action_nul,
+                                                sensor_get_celsius,
+                                                sensor_get_fahrenheit,
+                                                sensor_get_humidity};
   static const void (*mode_set[MAX_MODE_NB])() = {rv1_init,
                                                   ldr_init,
                                                   ntc_init,
                                                   temp_init,
                                                   mode4_init,
+                                                  sensor_measurement_init,
                                                   sensor_measurement_init,
                                                   sensor_measurement_init};
 
@@ -898,14 +921,14 @@ void loop() {
   while (1) {
     action[mode_select]();
     if (BUTTON_PUSHED(PIND, SW1)) {
-      iter_inc(mode_select, MAX_MODE_NB - 1);
+      circular_inc(mode_select, MAX_MODE_NB - 1);
       mode_init_decorator(mode_set[mode_select], mode_select);
       _delay_ms(DEBOUNCE_DLY);
       WAIT_RELEASE_BUTTON(PIND, SW1);
       _delay_ms(DEBOUNCE_DLY);
     }
     if (BUTTON_PUSHED(PIND, SW2)) {
-      iter_dec(mode_select, MAX_MODE_NB - 1);
+      circular_dec(mode_select, MAX_MODE_NB - 1);
       mode_init_decorator(mode_set[mode_select], mode_select);
       _delay_ms(DEBOUNCE_DLY);
       WAIT_RELEASE_BUTTON(PIND, SW2);
