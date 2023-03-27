@@ -765,6 +765,17 @@ static void led_screen_display_hourmin() {
   circular_inc(dig, 3);
 }
 
+static void led_screen_display_daymonth() {
+  uint8_t current_dig = numbers[nbrs[dig]];
+
+  CLEAR_DIGIT(DIG_1 | DIG_2 | DIG_3 | DIG_4);
+  if (dig == 3)
+    current_dig &= ~SEG_DOT;
+  SET_NB(current_dig);
+  SET_DIGIT(digit[dig]);
+  circular_inc(dig, 3);
+}
+
 /* Break down nb in four digits. Store each digit in 'nbrs' global variable */
 static void break_down(uint16_t n) {
   uint8_t result[4] = {0, 0, 0, 0};
@@ -781,7 +792,7 @@ static void break_down(uint16_t n) {
 
 /* ******************** MODE_SELECTION ******************** */
 
-#define MAX_MODE_NB 9
+#define MAX_MODE_NB 10
 
 #define DECL_MODE_INIT(name) static void name()
 
@@ -896,6 +907,13 @@ DECL_TC1_COMPB_MODE(get_rtc_hm) {
   break_down((pcf8563_data_to_hour(date) * 100) + (pcf8563_data_to_min(date)));
 }
 
+DECL_TC1_COMPB_MODE(get_rtc_daymonth) {
+  uint8_t date[PCF8563_FULL_DATE_LEN];
+
+  pcf8563_read_date(date, PCF8563_REG_SEC);
+  break_down((pcf8563_data_to_day(date) * 100) + (pcf8563_data_to_month(date)));
+}
+
 /* ******************** ISR ******************** */
 
 volatile uint8_t cnt;
@@ -903,7 +921,8 @@ volatile uint8_t cnt;
 static void (*led_screen_display_mode[MAX_MODE_NB])() = {
   led_screen_display_nb,   led_screen_display_nb, led_screen_display_nb,
   led_screen_display_nb,   led_screen_display_42, led_screen_display_cel,
-  led_screen_display_fahr, led_screen_display_hum, led_screen_display_hourmin};
+  led_screen_display_fahr, led_screen_display_hum, led_screen_display_hourmin,
+  led_screen_display_daymonth};
 
 /* ISR used to call various flavors of LED screen displaying callbacks */
 ISR(TIMER2_COMPA_vect) { led_screen_display_mode[mode_select](); }
@@ -911,7 +930,7 @@ ISR(TIMER2_COMPA_vect) { led_screen_display_mode[mode_select](); }
 static void (*tc1_cmpB_mode[MAX_MODE_NB])() = {
   tc1cmpB_nul, tc1cmpB_nul,        tc1cmpB_nul,        tc1cmpB_nul,
   mode_4,      sensor_measurement, sensor_measurement, sensor_measurement,
-  get_rtc_hm};
+  get_rtc_hm, get_rtc_daymonth};
 
 /* ISR used to call various flavors of callbacks */
 ISR(TIMER1_COMPB_vect) { tc1_cmpB_mode[mode_select](); }
@@ -1007,6 +1026,7 @@ void loop() {
                                           sensor_get_celsius,
                                           sensor_get_fahrenheit,
                                           sensor_get_humidity,
+                                          action_nul,
                                           action_nul};
   static void (*mode_set[MAX_MODE_NB])() = {rv1_init,
                                             ldr_init,
@@ -1016,6 +1036,7 @@ void loop() {
                                             sensor_measurement_init,
                                             sensor_measurement_init,
                                             sensor_measurement_init,
+                                            rtc_init,
                                             rtc_init};
 
   mode_init_decorator(mode_set[mode_select], mode_select);
