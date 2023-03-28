@@ -21,8 +21,8 @@ void uart_init() {
   UBRR0H = (uint8_t)(baud >> 8);   /* write to higher byte */
   UBRR0L = (uint8_t)(baud & 0xFF); /* write to lower byte */
 
-  /* Enable receiver and transmitter */
-  UCSR0B = (1 << TXEN0) | (1 << RXEN0);
+  /* Enable receiver and transmitter, RX interrupt enable */
+  UCSR0B = (1 << TXEN0) | (1 << RXEN0) | (1 << RXCIE0);
   UCSR0C = (3 << UCSZ00); /* be sure 8 bits enabled */
 }
 
@@ -51,60 +51,91 @@ void uart_printstr(const char *str) {
 
 /* ******************** USER INPUT ******************** */
 
+#define PROMPT_BUF_SIZE 24
+static char prompt_buf[24];
+volatile uint8_t buf_idx;
+
 #define BUFLEN 13
 #define DEL 127
 #define BELL 7
 #define ENTER 13
 
-int ft_isprint(unsigned char c) { return ((c >= 32 && c <= 126)); }
+void	*ft_memset(void *b, int c, uint16_t len) {
+	unsigned char	*b_cpy;
+	unsigned char	d;
 
-void prompt(const char *prompt, char *buf, uint16_t prompt_size) {
-  int i = 0;
-  char c;
-
-  if (prompt) uart_printstr(prompt);
-
-  while (i < prompt_size) {
-    c = uart_rx();
-
-    if (i == prompt_size - 1) {
-      if (c != ENTER && c != DEL) {
-        uart_tx(BELL);
-        continue;
-      }
-    }
-
-    if (ft_isprint(c)) {
-      buf[i] = c;
-      uart_tx(c);
-      i++;
-    } else if (c == ENTER) {
-      uart_printstr("\n\r");
-      break;
-    } else if (c == DEL) {
-      if (i > 0) {
-        i--;
-        buf[i] = 0;
-        uart_printstr("\b \b");
-      } else
-        uart_tx(BELL);
-    } else
-      uart_tx(BELL);
-  }
+	d = (unsigned char)c;
+	b_cpy = (unsigned char *)b;
+	while (len--)
+		*b_cpy++ = d;
+	return (b);
 }
 
 int ft_isdigit(int c) { return (c > 47 && c < 58); }
 
-uint16_t ft_atoi(const char *str) {
+int ft_isprint(unsigned char c) { return ((c >= 32 && c <= 126)); }
+
+uint16_t ft_atoi(const char *str, uint8_t size) {
   uint16_t nbr;
   int i = 0;
 
+  if (!size) return 0;
   nbr = 0;
-  while (ft_isdigit(str[i])) {
+  while (ft_isdigit(str[i]) && size-- != 0) {
     nbr = nbr * 10 + (str[i] - 48);
     i++;
   }
   return nbr;
+}
+
+uint8_t parse_input(uint16_t *date_values) {
+  uint8_t digit_idx[14] = {0,1,3,4,6,7,8,9,11,12,14,15},
+          nb_idx[5] = {0,3,6,11,14},
+          nb_size[5] = {2,2,4,2,2};
+  uint16_t max_value[5] = {31, 12, 2099, 23, 59},
+           min_value[5] = {0, 1, 2023, 0, 0};
+
+  for (uint8_t i = 0; i < 14; i++)
+    if (!ft_isdigit(prompt_buf[digit_idx[i]]))
+      return 1;
+  if (prompt_buf[2] != '/' || prompt_buf[5] != '/' || prompt_buf[10] != ' '
+      || prompt_buf[13] != ':')
+    return 1;
+
+  for (uint8_t i = 0; i < 5; i++) {
+    date_values[i] = ft_atoi(prompt_buf + nb_idx[i], nb_size[i]);
+    if (date_values[i] > max_value[i] || date_values[i] < min_value[i])
+      return 1;
+  }
+
+  return 0;
+}
+
+uint8_t prompt(char c) {
+  if (buf_idx == PROMPT_BUF_SIZE - 1) {
+    if (c != ENTER && c != DEL) {
+      uart_tx(BELL);
+      return 0;
+    }
+  }
+
+  if (ft_isprint(c)) {
+    prompt_buf[buf_idx] = c;
+    uart_tx(c);
+    buf_idx++;
+  } else if (c == ENTER) {
+    uart_printstr("\n\r");
+    return 1;
+  } else if (c == DEL) {
+    if (buf_idx > 0) {
+      buf_idx--;
+      prompt_buf[buf_idx] = 0;
+      uart_printstr("\b \b");
+    } else
+      uart_tx(BELL);
+  } else
+    uart_tx(BELL);
+  return 0;
 }
 
 /* ******************** SPI ******************** */
@@ -547,6 +578,18 @@ void int_safe2(void (*cb)(uint8_t, uint8_t), uint8_t data, uint8_t action) {
 #define PCF8563_REG_YEARS 0x08
 
 #define PCF8563_FULL_DATE_LEN 0x07
+
+/* fill buf with full date. buf must be of size PCF8563_FULL_DATE_LEN */
+void pcf8563_write_date(const uint8_t *buf, uint8_t reg, uint8_t size) {
+  i2c_start();
+  i2c_transmit_addr(PCF8563_ADDR, ADDR_W);
+  i2c_write(reg);
+
+  for (uint8_t i = 0; i < size; i++)
+    i2c_write(buf[i]);
+
+  i2c_stop();
+}
 
 /* fill buf with full date. buf must be of size PCF8563_FULL_DATE_LEN */
 void pcf8563_read_date(uint8_t *buf, uint8_t reg) {
@@ -1032,6 +1075,36 @@ ISR(ADC_vect) {
   TIFR0 = (1 << TOV0);
 }
 
+void set_rtc(uint16_t *date_values) {
+  uint8_t rtc_date[5];
+
+  /* convert input date values to BCD format */
+  rtc_date[0] = ((date_values[4] / 10) << 4) + (date_values[4] % 10); /* min */
+  rtc_date[1] = ((date_values[3] / 10) << 4) + (date_values[3] % 10); /* hour */
+  rtc_date[2] = ((date_values[0] / 10) << 4) + (date_values[0] % 10); /* days */
+  rtc_date[3] = ((date_values[1] / 10) << 4) + (date_values[1] % 10); /* month */
+  rtc_date[4] = (((date_values[2] % 100) / 10) << 4) + (date_values[2] % 10); /* year */
+  pcf8563_write_date(rtc_date, PCF8563_REG_MIN, 3);
+  pcf8563_write_date(rtc_date + 3, PCF8563_REG_CENTURY_MONTHS, 2);
+}
+
+/* fill buffer and if parsing is good, set rtc_clock */
+ISR(USART_RX_vect) {
+  uint16_t date_values[5];
+  uint8_t received, ret;
+
+  received = UDR0;
+  ret = prompt(received);
+  if (ret) {
+    if (parse_input(date_values))
+      uart_printstr("Wrong input. Usage: 'dd/mm/yyyy hh:mm'\r\n");
+    else
+      set_rtc(date_values);
+    buf_idx = 0;
+    ft_memset(prompt_buf, 0, PROMPT_BUF_SIZE);
+  }
+}
+
 /* ******************** ACTION_MODE ******************** */
 
 #define DECL_ACTION_MODE(name) static void name()
@@ -1166,34 +1239,11 @@ void start_routine() {
   }
 }
 
-void set_date() {
-  char buf[BUFLEN] = {0};
-  uint8_t inc;
-  uint16_t date_values[5], max_value[5] = {31, 12, 2099, 23, 59};
-  char usr_prompt[5][32] = {
-      "Set day (dd): ", "Set month (mm): ", "Set year (yyyy): ",
-      "Set hour (hh): ", "Set minutes (mm): "};
-
-  uart_printstr("Set date and time at this format: dd/mm/yyyy hh/mm\r\n");
-  for (uint8_t i = 0; i < 5; i++) {
-    inc = (((i > 0) * 2) * (((i == 3) * 1) + 1));
-    prompt(usr_prompt[i], buf + inc, 3);
-    if (!ft_isdigit(buf[inc]) || !ft_isdigit(buf[inc + 1])) {
-      uart_printstr("Wrong input, exit prompt\r\n");
-      break;
-    }
-    date_values[i] = ft_atoi(buf + inc);
-    if (date_values[i] > max_value[i]) {
-      uart_printstr("Wrong input, exit prompt\r\n");
-      break;
-    }
-  }
-}
-
 int main() {
-  cnt = dig = mode_select = loop_action = 0;
+  cnt = dig = mode_select = loop_action = buf_idx = 0;
   led_nb = 8888;
 
+  ft_memset(prompt_buf, 0, PROMPT_BUF_SIZE);
   break_down(led_nb);
 
   switch_init();
@@ -1205,8 +1255,6 @@ int main() {
   aht20_sensor_power_on();
   i2c_expander_init_port0();
   i2c_expander_init_port1();
-
-  /* set_date(); // maybe en fait juste init uart pour que ça autotrigger rx */
 
   /* tc1 used to count every seconds */
   set_timer1(TC1_MODE4_A, TC1_MODE4_B, TC1_PRESCALER_1024, TC1_COMPA, 15624);
