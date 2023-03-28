@@ -39,6 +39,12 @@ char uart_rx(void) {
   return UDR0; /* Get and return received data from buffer */
 }
 
+void uart_Flush(void) {
+  unsigned char dummy;
+  while (UCSR0A & (1 << RXC0)) dummy = UDR0;
+  (void)dummy;
+}
+
 void uart_printstr(const char *str) {
   while (*str) uart_tx(*str++);
 }
@@ -87,7 +93,7 @@ void prompt(const char *prompt, char *buf, uint16_t prompt_size) {
   }
 }
 
-int	ft_isdigit(int c) { return (c > 47 && c < 58); }
+int ft_isdigit(int c) { return (c > 47 && c < 58); }
 
 uint16_t ft_atoi(const char *str) {
   uint16_t nbr;
@@ -568,9 +574,7 @@ uint8_t pcf8563_data_to_day(const uint8_t *data) {
   return (((data[3] & 0x30) >> 4) * 10) + (data[3] & 0xF);
 }
 
-uint8_t pcf8563_data_to_weekday(const uint8_t *data) {
-  return data[4] & 0x07;
-}
+uint8_t pcf8563_data_to_weekday(const uint8_t *data) { return data[4] & 0x07; }
 
 uint8_t pcf8563_data_to_month(const uint8_t *data) {
   return (((data[5] & 0x10) >> 4) * 10) + (data[5] & 0xF);
@@ -816,8 +820,7 @@ static void led_screen_display_hourmin() {
   uint8_t current_dig = numbers[nbrs[dig]];
 
   CLEAR_DIGIT(DIG_1 | DIG_2 | DIG_3 | DIG_4);
-  if (dig == 1 || dig == 3)
-    current_dig &= ~SEG_DOT;
+  if (dig == 1 || dig == 3) current_dig &= ~SEG_DOT;
   SET_NB(current_dig);
   SET_DIGIT(digit[dig]);
   circular_inc(dig, 3);
@@ -827,8 +830,7 @@ static void led_screen_display_daymonth() {
   uint8_t current_dig = numbers[nbrs[dig]];
 
   CLEAR_DIGIT(DIG_1 | DIG_2 | DIG_3 | DIG_4);
-  if (dig == 3)
-    current_dig &= ~SEG_DOT;
+  if (dig == 3) current_dig &= ~SEG_DOT;
   SET_NB(current_dig);
   SET_DIGIT(digit[dig]);
   circular_inc(dig, 3);
@@ -986,18 +988,20 @@ DECL_TC1_COMPB_MODE(get_rtc_year) {
 volatile uint8_t cnt;
 
 static void (*led_screen_display_mode[MAX_MODE_NB])() = {
-  led_screen_display_nb,   led_screen_display_nb, led_screen_display_nb,
-  led_screen_display_nb,   led_screen_display_42, led_screen_display_cel,
-  led_screen_display_fahr, led_screen_display_hum, led_screen_display_hourmin,
-  led_screen_display_daymonth, led_screen_display_nb};
+    led_screen_display_nb,      led_screen_display_nb,
+    led_screen_display_nb,      led_screen_display_nb,
+    led_screen_display_42,      led_screen_display_cel,
+    led_screen_display_fahr,    led_screen_display_hum,
+    led_screen_display_hourmin, led_screen_display_daymonth,
+    led_screen_display_nb};
 
 /* ISR used to call various flavors of LED screen displaying callbacks */
 ISR(TIMER2_COMPA_vect) { led_screen_display_mode[mode_select](); }
 
 static void (*tc1_cmpB_mode[MAX_MODE_NB])() = {
-  tc1cmpB_nul, tc1cmpB_nul,        tc1cmpB_nul,        tc1cmpB_nul,
-  mode_4,      sensor_measurement, sensor_measurement, sensor_measurement,
-  get_rtc_hm, get_rtc_daymonth, get_rtc_year};
+    tc1cmpB_nul, tc1cmpB_nul,        tc1cmpB_nul,        tc1cmpB_nul,
+    mode_4,      sensor_measurement, sensor_measurement, sensor_measurement,
+    get_rtc_hm,  get_rtc_daymonth,   get_rtc_year};
 
 /* ISR used to call various flavors of callbacks */
 ISR(TIMER1_COMPB_vect) { tc1_cmpB_mode[mode_select](); }
@@ -1016,8 +1020,8 @@ ISR(TIMER1_COMPA_vect) {
 }
 
 static void (*adc_mode[MAX_MODE_NB])(uint16_t) = {
-  display_adc_value, display_adc_value, display_adc_value,
-  display_adc_temp,  adc_nul,           adc_nul};
+    display_adc_value, display_adc_value, display_adc_value,
+    display_adc_temp,  adc_nul,           adc_nul};
 
 /* autotriggered by TC0 overflow. read and display adc value. */
 ISR(ADC_vect) {
@@ -1166,17 +1170,18 @@ void set_date() {
   char buf[BUFLEN] = {0};
   uint8_t inc;
   uint16_t date_values[5], max_value[5] = {31, 12, 2099, 23, 59};
-  char usr_prompt[5][32] = {"Set day (dd): ", "Set month (mm): ",
-                            "Set year (yyyy): ", "Set hour (hh): ",
-                            "Set minutes (mm): "};
+  char usr_prompt[5][32] = {
+      "Set day (dd): ", "Set month (mm): ", "Set year (yyyy): ",
+      "Set hour (hh): ", "Set minutes (mm): "};
 
   uart_printstr("Set date and time at this format: dd/mm/yyyy hh/mm\r\n");
   for (uint8_t i = 0; i < 5; i++) {
     inc = (((i > 0) * 2) * (((i == 3) * 1) + 1));
     prompt(usr_prompt[i], buf + inc, 3);
-    if (!ft_isdigit(buf[inc]) || !ft_isdigit(buf[inc + 1]))
+    if (!ft_isdigit(buf[inc]) || !ft_isdigit(buf[inc + 1])) {
       uart_printstr("Wrong input, exit prompt\r\n");
       break;
+    }
     date_values[i] = ft_atoi(buf + inc);
     if (date_values[i] > max_value[i]) {
       uart_printstr("Wrong input, exit prompt\r\n");
@@ -1201,7 +1206,7 @@ int main() {
   i2c_expander_init_port0();
   i2c_expander_init_port1();
 
-  set_date();
+  /* set_date(); // maybe en fait juste init uart pour que ça autotrigger rx */
 
   /* tc1 used to count every seconds */
   set_timer1(TC1_MODE4_A, TC1_MODE4_B, TC1_PRESCALER_1024, TC1_COMPA, 15624);
