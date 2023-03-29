@@ -55,20 +55,18 @@ void uart_printstr(const char *str) {
 static char prompt_buf[24];
 volatile uint8_t buf_idx;
 
-#define BUFLEN 13
 #define DEL 127
 #define BELL 7
 #define ENTER 13
 
-void	*ft_memset(void *b, int c, uint16_t len) {
-	unsigned char	*b_cpy;
-	unsigned char	d;
+void *ft_memset(void *b, int c, uint16_t len) {
+  unsigned char *b_cpy;
+  unsigned char d;
 
-	d = (unsigned char)c;
-	b_cpy = (unsigned char *)b;
-	while (len--)
-		*b_cpy++ = d;
-	return (b);
+  d = (unsigned char)c;
+  b_cpy = (unsigned char *)b;
+  while (len--) *b_cpy++ = d;
+  return (b);
 }
 
 int ft_isdigit(int c) { return (c > 47 && c < 58); }
@@ -89,17 +87,15 @@ uint16_t ft_atoi(const char *str, uint8_t size) {
 }
 
 uint8_t parse_input(uint16_t *date_values) {
-  uint8_t digit_idx[14] = {0,1,3,4,6,7,8,9,11,12,14,15},
-          nb_idx[5] = {0,3,6,11,14},
-          nb_size[5] = {2,2,4,2,2};
+  uint8_t digit_idx[14] = {0, 1, 3, 4, 6, 7, 8, 9, 11, 12, 14, 15},
+          nb_idx[5] = {0, 3, 6, 11, 14}, nb_size[5] = {2, 2, 4, 2, 2};
   uint16_t max_value[5] = {31, 12, 2099, 23, 59},
            min_value[5] = {0, 1, 2023, 0, 0};
 
   for (uint8_t i = 0; i < 14; i++)
-    if (!ft_isdigit(prompt_buf[digit_idx[i]]))
-      return 1;
-  if (prompt_buf[2] != '/' || prompt_buf[5] != '/' || prompt_buf[10] != ' '
-      || prompt_buf[13] != ':')
+    if (!ft_isdigit(prompt_buf[digit_idx[i]])) return 1;
+  if (prompt_buf[2] != '/' || prompt_buf[5] != '/' || prompt_buf[10] != ' ' ||
+      prompt_buf[13] != ':')
     return 1;
 
   for (uint8_t i = 0; i < 5; i++) {
@@ -585,8 +581,7 @@ void pcf8563_write_date(const uint8_t *buf, uint8_t reg, uint8_t size) {
   i2c_transmit_addr(PCF8563_ADDR, ADDR_W);
   i2c_write(reg);
 
-  for (uint8_t i = 0; i < size; i++)
-    i2c_write(buf[i]);
+  for (uint8_t i = 0; i < size; i++) i2c_write(buf[i]);
 
   i2c_stop();
 }
@@ -1082,8 +1077,10 @@ void set_rtc(uint16_t *date_values) {
   rtc_date[0] = ((date_values[4] / 10) << 4) + (date_values[4] % 10); /* min */
   rtc_date[1] = ((date_values[3] / 10) << 4) + (date_values[3] % 10); /* hour */
   rtc_date[2] = ((date_values[0] / 10) << 4) + (date_values[0] % 10); /* days */
-  rtc_date[3] = ((date_values[1] / 10) << 4) + (date_values[1] % 10); /* month */
-  rtc_date[4] = (((date_values[2] % 100) / 10) << 4) + (date_values[2] % 10); /* year */
+  rtc_date[3] =
+      ((date_values[1] / 10) << 4) + (date_values[1] % 10); /* month */
+  rtc_date[4] =
+      (((date_values[2] % 100) / 10) << 4) + (date_values[2] % 10); /* year */
   pcf8563_write_date(rtc_date, PCF8563_REG_MIN, 3);
   pcf8563_write_date(rtc_date + 3, PCF8563_REG_CENTURY_MONTHS, 2);
 }
